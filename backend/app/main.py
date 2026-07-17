@@ -1,0 +1,75 @@
+"""FastAPI application entrypoint.
+
+The startup hook pings Postgres and Redis. If either is unreachable we
+raise loudly rather than let requests fail with obscure connection errors.
+"""
+from __future__ import annotations
+
+import logging
+import os
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+
+from app.api.admin import router as admin_router
+from app.api.auth import router as auth_router
+from app.api.clients import router as clients_router
+from app.api.command_center import router as command_center_router
+from app.api.imports import router as imports_router
+from app.api.invites import router as invites_router
+from app.api.workspace import router as workspace_router
+from app.auth.revocation import _redis
+from app.db import app_engine
+
+
+log = logging.getLogger("niyam.main")
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Ping Postgres via the app engine (SET ROLE runs, so failures here
+    # surface a real config problem, not just "database is up").
+    with app_engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    # Ping Redis.
+    _redis.ping()
+    log.info("niyam.startup: postgres + redis reachable")
+    yield
+
+
+app = FastAPI(title="Niyam AI Backend", lifespan=_lifespan)
+
+# CORS — the dashboard runs on a separate origin from the API in dev
+# (localhost:3000 vs localhost:8000). Without this middleware the
+# browser fetch is preflighted, rejected, and the login form silently
+# stays put. Override the allowlist via NIYAM_CORS_ORIGINS in prod.
+_cors_origins = [
+    o.strip()
+    for o in os.getenv("NIYAM_CORS_ORIGINS", "http://localhost:3000").split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Retry-After"],
+)
+
+app.include_router(auth_router)
+app.include_router(invites_router)
+app.include_router(imports_router)
+app.include_router(command_center_router)
+app.include_router(clients_router)
+app.include_router(workspace_router)
+app.include_router(admin_router)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    # rule_pack_version is filled in by Step 6 seeding. Until then we return
+    # the placeholder so smoke tests don't crash on the field being missing.
+    return {"status": "ok", "rule_pack_version": "unseeded"}

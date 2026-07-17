@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+.tox/
+.python-version
+
+# Node / Next.js
+node_modules/
+.next/
+.turbo/
+dist/
+build/
+out/
+*.tsbuildinfo
+next-env.d.ts
+.eslintcache
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+**/*-trace.zip
+
+# Env + local config (keep .env.example checked in)
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+
+# IDEs
+.idea/
+.vscode/
+.vs/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker / local state
+niyam_pg/
+niyam_uploads/
+niyam_node_modules/
