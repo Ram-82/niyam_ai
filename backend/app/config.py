@@ -79,5 +79,27 @@ class Settings(BaseSettings):
     narrator_model: str = "claude-opus-4-7"
     anthropic_api_key: str = ""
 
+    # WhatsApp delivery feature flag + Meta Cloud API creds.
+    # Default OFF — Meta onboarding is a multi-week bureaucratic pipeline
+    # and the CA-approval gate should never light up in a dev / demo
+    # environment where a bad send would reach a real phone number.
+    whatsapp_enabled: bool = False
+    # 'mock' → in-memory transport, deterministic message ids.
+    # 'meta' → real Meta Cloud API v20; requires whatsapp_access_token
+    #          + whatsapp_phone_number_id + whatsapp_app_secret.
+    whatsapp_mode: str = "mock"
+    whatsapp_access_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    # Meta HMAC secret for POST /whatsapp/webhook signature check.
+    whatsapp_app_secret: str = ""
+    # One-time challenge/response secret Meta uses on webhook registration
+    # (GET /whatsapp/webhook?hub.verify_token=...). Independent of the
+    # HMAC app_secret — Meta documents both.
+    whatsapp_webhook_verify_token: str = ""
+    # Approved template names. These must be pre-approved on the WABA;
+    # Meta rejects any send whose template_name is not approved.
+    whatsapp_template_report_name: str = "niyam_report_v1"
+    whatsapp_template_chase_name: str = "niyam_supplier_chase_v1"
+
 
 settings = Settings()
