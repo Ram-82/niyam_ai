@@ -12,11 +12,24 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Build tools for bcrypt/cryptography wheels + libpq headers for psycopg[binary]
-# (binary distributes the extension but headers still help for edge cases).
+# System deps:
+#  * build-essential + libpq-dev — bcrypt/cryptography wheels + psycopg edges.
+#  * libcairo2 + libpango-1.0-0 + libpangocairo-1.0-0 + libgdk-pixbuf-2.0-0 +
+#    shared-mime-info — WeasyPrint's rendering stack (cairo/pango). Without
+#    these the PDF renderer fails at import time, not at request time.
+#  * fonts-noto-core + fonts-indic — Latin base + Devanagari/Kannada/Tamil
+#    for the vernacular 2-pager narration. The template falls back through
+#    DejaVu → Noto Sans → Noto Sans Devanagari/Kannada.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
+        libcairo2 \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
+        shared-mime-info \
+        fonts-noto-core \
+        fonts-indic \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the whole project so pip's editable install can resolve the package

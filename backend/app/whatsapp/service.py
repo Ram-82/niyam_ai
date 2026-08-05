@@ -372,6 +372,12 @@ def send(
 ) -> tuple[uuid.UUID, SendResult | None]:
     """Send the report / chase. Returns (attempt_id, send_result_or_None).
 
+    Auto-renders the PDF media when the caller did not supply it AND the
+    request is ``report_send`` (the chase template is text-only). This
+    keeps the API surface simple — the frontend sends without a payload
+    and the backend guarantees the CA-approved 2-pager is what actually
+    reaches the client, using the same narration_run the CA approved.
+
     Raises the gate + transport exceptions unchanged so the API layer
     can map them to typed HTTP responses. A failure still leaves a
     delivery_attempt row on the record — the audit story never has a
@@ -383,6 +389,22 @@ def send(
         req = _gate.load_and_validate(
             db, firm_id=firm_id, delivery_request_id=delivery_request_id
         )
+
+    # Auto-render the PDF for report_send when the caller didn't provide
+    # one. The chase template is text-only in P2, so we skip this branch
+    # for supplier_chase — sending an unnecessary PDF would be a WABA
+    # cost + template mismatch.
+    if (
+        media_bytes is None
+        and req["purpose"] == "report_send"
+        and req["narration_run_id"] is not None
+    ):
+        from app.pdf.service import render_narration_pdf
+
+        media_bytes = render_narration_pdf(
+            firm_id=firm_id, narration_run_id=req["narration_run_id"]
+        )
+        media_mime = "application/pdf"
 
     attempt_id = _open_attempt(firm_id, delivery_request_id, transport.provider)
 

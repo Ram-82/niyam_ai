@@ -33,7 +33,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api, apiBlob, ApiError } from "@/lib/api";
 import { NarrationPreview } from "@/components/NarrationPreview";
 import { DeliveryAttemptsList } from "@/components/DeliveryAttemptsList";
 import { NARRATION_LANGUAGE_LABELS } from "@/lib/constants";
@@ -134,6 +134,23 @@ export function DeliveryPanel({
     setPanel({ state: "preparing", narration: panel.narration });
   }
 
+  async function previewPdf(narrationRunId: string) {
+    setError(null);
+    try {
+      const blob = await apiBlob(`/narrator/runs/${narrationRunId}/pdf`);
+      const url = URL.createObjectURL(blob);
+      // Open in a new tab. Don't revoke the URL immediately — the tab
+      // needs it to load the PDF. Browsers reclaim it on tab close.
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setError(`PDF preview failed: ${e.message} (HTTP ${e.status})`);
+      } else {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    }
+  }
+
   async function submitSend(payload: {
     whatsappNumber: string;
     language: NarrationLanguage;
@@ -201,13 +218,20 @@ export function DeliveryPanel({
             onRegenerate={() => generate(panel.narration.language)}
             regenerating={regenerating}
           />
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <button
               onClick={openPrepare}
               className="px-4 py-2 bg-accent text-paper-raised font-semibold rounded-sm hover:bg-accent-hover transition-colors duration-fast"
               data-testid="prepare-delivery"
             >
               Send via WhatsApp
+            </button>
+            <button
+              onClick={() => previewPdf(panel.narration.narration_run_id)}
+              className="px-4 py-2 border border-rule bg-paper text-ink rounded-sm hover:border-rule-strong transition-colors duration-fast"
+              data-testid="preview-pdf"
+            >
+              Preview PDF
             </button>
           </div>
         </>

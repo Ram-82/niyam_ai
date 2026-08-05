@@ -1,0 +1,176 @@
+/*
+ * Two-pager styles — WeasyPrint-friendly print CSS.
+ *
+ * Design intent mirrors the on-screen tokens: ink on paper-raised, single
+ * accent, serif for headings so a printed page reads more "letterhead"
+ * than "dashboard export". The document is intentionally quiet — the CA
+ * has already reviewed and approved the words; this template just makes
+ * them printable.
+ */
+
+@page {
+  size: A4;
+  margin: 20mm 18mm 20mm 18mm;
+}
+
+body {
+  font-family: "DejaVu Sans", "Noto Sans", "Noto Sans Devanagari",
+    "Noto Sans Kannada", sans-serif;
+  color: #1a1a1a;
+  font-size: 11pt;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.mono {
+  font-family: "DejaVu Sans Mono", "Noto Sans Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Letterhead — the CA firm's brand at the top of every page. */
+.letterhead {
+  border-bottom: 2pt solid #1a1a1a;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+
+.letterhead .firm {
+  font-family: "DejaVu Serif", "Noto Serif", serif;
+  font-size: 16pt;
+  font-weight: 700;
+  letter-spacing: -0.2pt;
+}
+
+.letterhead .doc-meta {
+  text-align: right;
+  font-size: 9.5pt;
+  color: #555;
+}
+
+/* Section headings — restrained, uppercase small caps for scannability. */
+.section {
+  margin-top: 14pt;
+  page-break-inside: avoid;
+}
+
+.section-title {
+  font-family: "DejaVu Serif", "Noto Serif", serif;
+  font-size: 11pt;
+  text-transform: uppercase;
+  letter-spacing: 1pt;
+  color: #444;
+  margin: 0 0 4pt 0;
+  border-bottom: 0.5pt solid #cccccc;
+  padding-bottom: 2pt;
+}
+
+.prose {
+  margin: 6pt 0 0 0;
+  white-space: pre-line;
+  color: #1a1a1a;
+}
+
+/* Numbers table — restrained rules, monospace digits so decimals align. */
+.numbers {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6pt;
+  font-size: 10.5pt;
+}
+
+.numbers th {
+  text-align: left;
+  font-weight: 500;
+  color: #333;
+  padding: 3pt 6pt 3pt 0;
+  width: 60%;
+}
+
+.numbers td {
+  text-align: right;
+  padding: 3pt 0;
+  color: #1a1a1a;
+}
+
+.numbers tr.rule th,
+.numbers tr.rule td {
+  border-top: 0.5pt solid #cccccc;
+  padding-top: 5pt;
+}
+
+.disclaimer {
+  font-size: 9pt;
+  font-style: italic;
+  color: #555;
+  margin: 4pt 0 0 0;
+}
+
+/* Score + due-date block on page 2 — the "at-a-glance" strip. */
+.score-section {
+  display: flex;
+  gap: 20pt;
+  align-items: center;
+  border: 1pt solid #cccccc;
+  padding: 12pt;
+  margin-top: 12pt;
+}
+
+.score-value {
+  font-size: 42pt;
+  font-weight: 700;
+  color: #1a1a1a;
+  line-height: 1;
+}
+
+.score-label {
+  color: #555;
+  font-size: 9.5pt;
+  margin-top: 2pt;
+  text-transform: uppercase;
+  letter-spacing: 1pt;
+}
+
+.due-block {
+  margin-left: auto;
+  text-align: right;
+  color: #555;
+  font-size: 10pt;
+}
+
+.due-block .days-num {
+  font-size: 24pt;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.ask {
+  background: #f7f5f0;
+  border-left: 2pt solid #444;
+  padding: 8pt 10pt;
+}
+
+.page-break {
+  page-break-after: always;
+}
+
+/* Footer — the attribution line that satisfies the positioning rule:
+   Niyam appears once, small, at the bottom of page 2. The CA firm's
+   brand is what the client sees front and center on both pages via
+   the letterhead. (Not a running element — WeasyPrint's running-page
+   support is patchy; a per-page footer isn't important for a 2-pager.) */
+.footer {
+  margin-top: 20pt;
+  border-top: 0.5pt solid #cccccc;
+  padding-top: 6pt;
+  font-size: 8pt;
+  color: #777;
+  text-align: center;
+}
+
+.footer .niyam-attr {
+  margin-top: 2pt;
+  font-style: italic;
+}

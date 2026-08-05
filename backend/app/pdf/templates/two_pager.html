@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ client_name }} · {{ period_label }} · {{ return_type }}</title>
+  <link rel="stylesheet" href="two_pager.css">
+</head>
+<body>
+  <!--
+    Page 1 — the health + tax-position summary the CA has approved.
+    The header uses ``firm_name`` as the letterhead; Niyam attribution
+    appears only in the footer, small. This is the "CA looks premium"
+    positioning invariant in template form.
+  -->
+  <header class="letterhead">
+    <div class="firm">{{ firm_name }}</div>
+    <div class="doc-meta">
+      <div>{{ client_name }}</div>
+      <div class="mono">{{ period_label }} · {{ return_type }}</div>
+    </div>
+  </header>
+
+  <section class="section">
+    <h2 class="section-title">Business health</h2>
+    <p class="prose">{{ narration.page1_health }}</p>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title">Tax position</h2>
+    <p class="prose">{{ narration.page1_tax_position }}</p>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title">By the numbers</h2>
+    <table class="numbers">
+      <tbody>
+        <tr>
+          <th>Sales</th>
+          <td class="mono">{{ facts.sales_paise | rupees }}</td>
+        </tr>
+        <tr>
+          <th>Purchases</th>
+          <td class="mono">{{ facts.purchases_paise | rupees }}</td>
+        </tr>
+        <tr>
+          <th>Margin</th>
+          <td class="mono">{{ facts.margin_paise | rupees }}</td>
+        </tr>
+        <tr class="rule">
+          <th>Tax paid</th>
+          <td class="mono">{{ facts.tax_paid_paise | rupees }}</td>
+        </tr>
+        <tr>
+          <th>Tax due</th>
+          <td class="mono">{{ facts.tax_due_paise | rupees }}</td>
+        </tr>
+        <tr class="rule">
+          <th>ITC — matched</th>
+          <td class="mono">{{ facts.itc.matched_paise | rupees }}</td>
+        </tr>
+        <tr>
+          <th>ITC — probable (review pending)</th>
+          <td class="mono">{{ facts.itc.probable_paise | rupees }}</td>
+        </tr>
+        <tr>
+          <th>ITC — at risk (no 2B match)</th>
+          <td class="mono">{{ facts.itc.supplier_default_paise | rupees }}</td>
+        </tr>
+        <tr>
+          <th>ITC — missing register entries</th>
+          <td class="mono">{{ facts.itc.missing_entry_paise | rupees }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="disclaimer">Every ITC figure above: before credit/debit note adjustments.</p>
+  </section>
+
+  <div class="page-break"></div>
+
+  <!--
+    Page 2 — action items + optional ask. Same letterhead so a printed
+    stack is unambiguous about which client + period.
+  -->
+  <header class="letterhead">
+    <div class="firm">{{ firm_name }}</div>
+    <div class="doc-meta">
+      <div>{{ client_name }}</div>
+      <div class="mono">{{ period_label }} · {{ return_type }}</div>
+    </div>
+  </header>
+
+  <section class="section score-section">
+    <div class="score-block">
+      <div class="score-value mono">{{ facts.readiness_score }}</div>
+      <div class="score-label">Filing readiness · out of 100</div>
+    </div>
+    <div class="due-block">
+      {% if facts.days_to_due >= 0 %}
+        <div class="mono days-num">{{ facts.days_to_due }}</div>
+        <div>days to {{ return_type }} due</div>
+      {% else %}
+        <div class="mono days-num">{{ (facts.days_to_due | abs) }}</div>
+        <div>days past {{ return_type }} due</div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="section">
+    <h2 class="section-title">Needs attention</h2>
+    <p class="prose">{{ narration.page2_attention }}</p>
+  </section>
+
+  {% if narration.page2_ask_your_ca %}
+  <section class="section ask">
+    <h2 class="section-title">Ask your CA</h2>
+    <p class="prose">{{ narration.page2_ask_your_ca }}</p>
+  </section>
+  {% endif %}
+
+  <footer class="footer">
+    <div>
+      Prepared for {{ client_name }} · {{ period_label }} ·
+      generated {{ generated_at }} · rule pack {{ facts.rule_pack_version or "—" }}
+    </div>
+    <div class="niyam-attr">
+      Numbers computed by Niyam AI's deterministic engines · prose reviewed and approved by {{ firm_name }}
+    </div>
+  </footer>
+</body>
+</html>

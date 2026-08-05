@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -128,3 +129,42 @@ def list_runs(
     )
     rows = session.execute(text(sql), params).mappings().all()
     return [NarrationRunRow(**dict(r)) for r in rows]
+
+
+@router.get(
+    "/runs/{narration_run_id}/pdf",
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+def get_narration_pdf(
+    narration_run_id: uuid.UUID,
+    user: AppUser = Depends(get_current_user),
+) -> Response:
+    """Render the persisted narration_run to PDF for CA preview.
+
+    Same bytes the WhatsApp send would attach — so a CA can eyeball
+    exactly what the client will receive before approving delivery.
+    RLS scopes the narration_run lookup to the caller's firm."""
+    from app.pdf.service import NarrationRunUnavailable, render_narration_pdf
+    from app.narrator.types import NumberHallucination
+
+    try:
+        pdf_bytes = render_narration_pdf(
+            firm_id=user.firm_id, narration_run_id=narration_run_id
+        )
+    except NarrationRunUnavailable:
+        raise HTTPException(status_code=404, detail="narration_run_not_found")
+    except NumberHallucination:
+        # A persisted narration whose prose no longer validates is a P0
+        # data-integrity signal. Do not ship the PDF; surface loud.
+        raise HTTPException(
+            status_code=500, detail="narration_hallucination_at_render"
+        )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="niyam-report-{narration_run_id}.pdf"'
+            )
+        },
+    )

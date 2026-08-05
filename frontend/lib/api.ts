@@ -129,3 +129,34 @@ function safeJson(text: string): unknown {
     return text;
   }
 }
+
+
+/**
+ * Fetch a binary resource (e.g. PDF preview) with the auth header
+ * attached. Returns a Blob the caller can turn into an object URL for
+ * ``window.open`` or a download link.
+ *
+ * On non-2xx: throws ApiError with the response body as text (best
+ * effort — a binary endpoint that 500s often returns JSON error).
+ */
+export async function apiBlob(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  const token = getAccessToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE}${path}`, { method: "GET", headers });
+  if (res.status === 401) {
+    clearAccessToken();
+  }
+  if (!res.ok) {
+    // Try to pull a JSON error body; fall back to text.
+    const txt = await res.text();
+    const parsed = txt ? safeJson(txt) : null;
+    const detail =
+      (parsed && typeof parsed === "object" && "detail" in (parsed as any)
+        ? String((parsed as any).detail)
+        : txt) || res.statusText;
+    throw new ApiError(res.status, detail, parsed, null);
+  }
+  return res.blob();
+}
