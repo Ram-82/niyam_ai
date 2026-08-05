@@ -32,6 +32,118 @@ export const BUCKET_DESCRIPTIONS: Record<string, string> = {
 };
 
 /**
+ * GSP connection reason → user-facing copy. The panel must render the
+ * SPECIFIC stored cause (not a generic message) so the CA understands
+ * what to say to the client. Vendor-side revocation and TTL expiry
+ * imply different follow-up actions.
+ */
+export const GSP_RECONNECT_REASON: Record<string, string> = {
+  consent_revoked:
+    "Consent was revoked on the GSTN portal. Ask the client to reconnect from your side; the OTP will go to the GSTIN-registered mobile.",
+  session_expired:
+    "The GSP session TTL elapsed. Reconnect to refresh; the OTP goes to the GSTIN-registered mobile.",
+  reconnect:
+    "This connection was superseded by a newer one.",
+  user_disconnected:
+    "This GSTIN was manually disconnected from Niyam.",
+};
+
+/**
+ * OTP flow reality: the OTP is sent to the MSME owner's mobile
+ * (registered on the GSTIN with GSTN), NOT the CA's phone. The CA
+ * calls the client and the client reads out the code. Every UI touch
+ * point uses this exact copy so no CA is surprised.
+ */
+export const GSP_OTP_DELIVERY_COPY =
+  "The one-time code goes to the mobile number registered on this GSTIN with GSTN. Call the client and have them read it out.";
+
+
+/**
+ * Rate-limit copy — every user-visible 429 renders through one of these
+ * builders. The ``at`` argument is a wall-clock time string produced by
+ * ``formatRetryAt`` (see ``lib/format-retry-after.ts``).
+ *
+ * Design rules (P2.1 Stage D):
+ *   - state WHAT happened + WHEN it clears + brief WHY (if useful)
+ *   - never push "contact support" as primary path
+ *   - no blame, no reassurance-theatre
+ *   - restyle allowed, reword frozen: shape-locked by
+ *     ``rate-limit-copy.test.ts`` so a silent rewording breaks CI
+ */
+/**
+ * Failed-pull reason copy (P2.1 Stage E). One entry per ``error_kind``
+ * value that can land on a ``gsp_pull_attempt.error_kind`` field.
+ *
+ *   needs_action = false  → transient / auto-retry (amber chip, no CTA)
+ *   needs_action = true   → CA action required (reconnect via existing button)
+ *
+ * ``next_retry_at`` is an optional wall-clock string; when present, the
+ * copy appends " at ${next_retry_at}" so the CA sees when Niyam plans
+ * to try again.
+ *
+ * Anti-drift shape-locked in ``failed-pull-reason.test.ts``.
+ */
+export const FAILED_PULL_REASON: Record<
+  string,
+  { needs_action: boolean; text: (opts: { next_retry_at?: string | null }) => string }
+> = {
+  gstn_unavailable: {
+    needs_action: false,
+    text: ({ next_retry_at }) =>
+      next_retry_at
+        ? `GSTN was unavailable on the last attempt. Niyam will retry automatically at ${next_retry_at}.`
+        : "GSTN was unavailable on the last attempt. Niyam will retry automatically.",
+  },
+  rate_limited: {
+    needs_action: false,
+    text: ({ next_retry_at }) =>
+      next_retry_at
+        ? `GSP rate limit hit on the last attempt. Niyam will retry automatically at ${next_retry_at}.`
+        : "GSP rate limit hit on the last attempt. Niyam will retry automatically.",
+  },
+  session_expired: {
+    needs_action: true,
+    text: () => "The GSP session had expired at the time of the last attempt.",
+  },
+  consent_revoked: {
+    needs_action: true,
+    text: () =>
+      "Consent was revoked on the GSTN portal; the last attempt could not proceed.",
+  },
+  session_dead: {
+    needs_action: true,
+    text: () => "No live GSP session at the time of the last attempt.",
+  },
+  unknown: {
+    needs_action: true,
+    text: () =>
+      "The last attempt failed with an unclassified error. Try Pull-now again; if it repeats, reconnect.",
+  },
+};
+
+
+/**
+ * Default when a ``gsp_pull_attempt.error_kind`` is present but not one
+ * of the mapped values. Kept conservative — no speculation about cause.
+ */
+export const FAILED_PULL_REASON_DEFAULT = FAILED_PULL_REASON["unknown"];
+
+
+export const RATE_LIMIT_COPY = {
+  /** 429 from POST /gsp/consent — per-GSTIN SMS-flood cooldown, 3/hour. */
+  otp_sms_cooldown: (at: string) =>
+    `Next OTP request available at ${at}. Cap is 3 per GSTIN per hour to protect the registered mobile.`,
+
+  /** 429 from POST /gsp/consent/confirm — OTP brute-force lockout, 5 fails / 15 min per (user, GSTIN). */
+  otp_confirm_lockout: (at: string) =>
+    `Five wrong OTPs on this GSTIN. Next attempt available at ${at}. A fresh OTP can be requested after that.`,
+
+  /** 429 from POST /auth/login — per-email login lockout, 5 fails / 15 min. */
+  login_lockout: (at: string) =>
+    `Five failed sign-in attempts on this email. Try again at ${at}.`,
+} as const;
+
+/**
  * The command-center default period is the last complete calendar
  * month (Asia/Kolkata). Server also computes this; front-end mirrors
  * so links / bookmarks work.

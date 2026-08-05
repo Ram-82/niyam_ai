@@ -111,8 +111,9 @@ test("full flow: login → command center → workspace → confirm → audit", 
   }
 
   // --- 2. Command center row visible + drill link ---
-  await page.getByTestId("period-input").fill(seed.period);
-  // wait for at least one row to render for our GSTIN
+  // The PeriodNav's default resolves to last-completed-month, which
+  // is the same period the seed uses. If the two ever drift (spec ran
+  // at midnight rollover), we'd click the prev-month chevron here.
   const row = page.getByTestId("cc-row").first();
   await expect(row).toBeVisible({ timeout: 15_000 });
 

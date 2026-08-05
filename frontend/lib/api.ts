@@ -15,10 +15,21 @@ const BASE =
 export class ApiError extends Error {
   status: number;
   body: unknown;
-  constructor(status: number, message: string, body: unknown) {
+  // Parsed from the ``Retry-After`` response header, in seconds. Only
+  // populated for 429 responses that carry the header — else ``null``.
+  // Used by the UI to render a wall-clock retry time; see
+  // ``lib/format-retry-after.ts`` and ``RATE_LIMIT_COPY``.
+  retryAfterSeconds: number | null;
+  constructor(
+    status: number,
+    message: string,
+    body: unknown,
+    retryAfterSeconds: number | null = null,
+  ) {
     super(message);
     this.status = status;
     this.body = body;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -69,7 +80,10 @@ export async function api<T = unknown>(
       (parsed && typeof parsed === "object" && "detail" in (parsed as any)
         ? String((parsed as any).detail)
         : text) || res.statusText;
-    throw new ApiError(res.status, detail, parsed);
+    const retryHdr = res.headers.get("Retry-After");
+    const retryAfterSeconds =
+      retryHdr && /^\d+$/.test(retryHdr) ? Number(retryHdr) : null;
+    throw new ApiError(res.status, detail, parsed, retryAfterSeconds);
   }
   return parsed as T;
 }
@@ -99,7 +113,10 @@ export async function apiFormData<T = unknown>(
       (parsed && typeof parsed === "object" && "detail" in (parsed as any)
         ? String((parsed as any).detail)
         : text) || res.statusText;
-    throw new ApiError(res.status, detail, parsed);
+    const retryHdr = res.headers.get("Retry-After");
+    const retryAfterSeconds =
+      retryHdr && /^\d+$/.test(retryHdr) ? Number(retryHdr) : null;
+    throw new ApiError(res.status, detail, parsed, retryAfterSeconds);
   }
   return parsed as T;
 }

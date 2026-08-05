@@ -19,6 +19,8 @@ export interface CommandCenterRow {
   days_to_due_date: number | null;
   itc_at_risk_paise: number;
   blockers_count: number;
+  blockers_ca: number;
+  blockers_client: number;
   last_computed_at: string | null;
 }
 
@@ -28,8 +30,24 @@ export interface CommandCenterResponse {
 }
 
 export interface ReconSummary {
-  matched: { count: number; paise: number; description?: string };
-  probable: { count: number; paise: number; description?: string };
+  matched: {
+    count: number;
+    paise: number;
+    // Stage-3 ITC split. Present on new pulls; the UI must show
+    // ``paise_claimable`` in the ITC-total number and surface
+    // ``paise_not_available`` as a separate callout (blocked-credit rows
+    // reconcile but cannot be claimed).
+    paise_claimable?: number;
+    paise_not_available?: number;
+    description?: string;
+  };
+  probable: {
+    count: number;
+    paise: number;
+    paise_claimable?: number;
+    paise_not_available?: number;
+    description?: string;
+  };
   supplier_default: {
     count: number;
     paise: number;
@@ -121,6 +139,16 @@ export interface User {
   totp_confirmed: boolean;
 }
 
+export interface Me {
+  id: string;
+  email: string;
+  firm_id: string;
+  firm_name: string;
+  role: "admin" | "staff";
+  totp_confirmed: boolean;
+  last_login_at: string | null;
+}
+
 /** Login response shape depends on TOTP enrolment status. */
 export type LoginResponse =
   | {
@@ -133,3 +161,72 @@ export type LoginResponse =
       totp_setup_token: string;
       expires_in: number;
     };
+
+
+// ---------------------------------------------------------------------------
+// GSP (P2)
+// ---------------------------------------------------------------------------
+
+
+export type GspConnectionState =
+  | "not_connected"
+  | "connected"
+  | "reconnect_needed";
+
+export type GspRevokeReason =
+  | "consent_revoked"     // Vendor pulled consent
+  | "session_expired"     // TTL elapsed
+  | "reconnect"           // Superseded by a subsequent connect
+  | "user_disconnected";  // Manual disconnect
+
+export interface GspBackfillItem {
+  period: string;
+  label: string;
+}
+
+export interface LatestGspAttempt {
+  id: string;
+  status: "running" | "succeeded" | "failed" | "retry_scheduled";
+  error_kind: string | null;
+  started_at: string;
+  finished_at: string | null;
+  next_retry_at: string | null;
+}
+
+export interface GspConnectionStatus {
+  gstin_profile_id: string;
+  gstin: string;
+  // Session-only state. The panel derives the fourth "last_pull_failed"
+  // UI state by blending this with ``latest_attempt`` — see
+  // ``ConnectionsPanel::derivePanelState`` (P2.1 Stage E).
+  state: GspConnectionState;
+  reason: GspRevokeReason | null;
+  session_expires_at: string | null;
+  last_successful_pull_at: string | null;
+  last_pull_period: string | null;
+  sandbox_mode: boolean;
+  monthly_call_count: number;
+  backfill_offer: GspBackfillItem[];
+  latest_attempt: LatestGspAttempt | null;
+}
+
+export type GspPullAttemptStatus =
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "retry_scheduled";
+
+export interface GspPullAttempt {
+  id: string;
+  gstin_profile_id: string;
+  period: string;
+  source: "manual" | "scheduled";
+  status: GspPullAttemptStatus;
+  attempt_count: number;
+  error_kind: string | null;
+  error_message: string | null;
+  gstn_pull_id: string | null;
+  started_at: string;
+  finished_at: string | null;
+  next_retry_at: string | null;
+}

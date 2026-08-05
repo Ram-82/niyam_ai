@@ -16,18 +16,23 @@ Behaviour:
   calendar month designed to hit every reconciliation bucket in a
   demo-worthy way:
 
-    Bucket             Rows  ₹ total   Purpose
-    matched              10   2,50,000  cleanly reconciled ITC
-    probable              2   1,50,000  live confirm demo
-    supplier_default      6      43,000  the "₹43,000 at risk" headline
+    Bucket             Rows  ₹ total         Purpose
+    matched              10   85,808.10      cleanly reconciled ITC
+    probable              2   86,242.13      live confirm demo
+    supplier_default      6   43,000.00      the "₹43,000 at risk" headline
       (2 with near-misses, 4 without — both review states visible)
-    missing_entry         1   1,20,000  the fat unrecorded purchase
-    (also: 3 R001-only invoices ₹57,000 with NULL counterparty — not
+    missing_entry         1   1,24,906.26    the fat unrecorded purchase
+    (also: 3 R001-only invoices ~₹56,000 with NULL counterparty — not
      part of recon, but seed validation errors for the invoices tab)
 
-  Total register value ₹5,00,000. Sum of supplier_default rows equals
-  the headline ₹43,000 exactly — CAs WILL do that arithmetic in their
-  head at a demo.
+  Sum of supplier_default rows equals the headline **₹43,000.00
+  exactly** — the six invoice totals are
+  17,924.50 + 8,478.90 + 5,182.60 + 4,631.20 + 4,118.90 + 2,663.90.
+  Every OTHER bucket total is non-round because it falls out of
+  realistic textile-trade arithmetic (fabric metres × per-metre rate,
+  T-shirts × per-piece rate). The ₹43,000.00 invariant is asserted
+  inside ``seed_invoices_and_2b`` — edit ``SD_SPEC`` and the seed
+  refuses to run if the sum drifts.
 
 * Runs validate_period, reconcile_period, and compute_and_persist so
   the dashboard opens with real snapshots, not placeholders.
@@ -49,6 +54,7 @@ import json
 import sys
 import uuid
 from datetime import date, datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from sqlalchemy import text
@@ -275,8 +281,174 @@ def _insert_b2b(
     )
 
 
+# ---------------------------------------------------------------------------
+# Tax-computation helpers used by the seed.
+#
+# Every rupee value below is written out as a string (e.g. "12175.63") and
+# converted to paise via the same HALF_UP quantization the ingestion path uses
+# (see ``app/ingestion/canonical.py::rupees_to_paise``). That keeps seed-side
+# arithmetic byte-identical to what a CA-uploaded CSV would produce for the
+# same values.
+# ---------------------------------------------------------------------------
+
+
+def _to_paise(rupees_str: str) -> int:
+    """Rupee string → integer paise. HALF_UP at the paise boundary."""
+    return int(
+        (Decimal(rupees_str) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+
+
+def _intra_18(taxable_p: int) -> tuple[int, int, int]:
+    """Intra-state 18%: return ``(cgst_paise, sgst_paise, total_paise)``.
+    Total tax is quantized HALF_UP, then split; odd paise goes to SGST so
+    the split is deterministic."""
+    tax = int(
+        (Decimal(taxable_p) * Decimal("18") / Decimal("100")).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+    cgst = tax // 2
+    sgst = tax - cgst
+    return cgst, sgst, taxable_p + tax
+
+
+def _inter_18(taxable_p: int) -> tuple[int, int]:
+    """Inter-state 18%: return ``(igst_paise, total_paise)``."""
+    igst = int(
+        (Decimal(taxable_p) * Decimal("18") / Decimal("100")).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+    return igst, taxable_p + igst
+
+
+def _sd_backsolve_intra(total_p: int) -> tuple[int, int, int, int, int]:
+    """Back-solve intra-state (CGST+SGST) so ``taxable + cgst + sgst == total_p``.
+    Returns ``(taxable, cgst, sgst, igst=0, total)``. Guarantees per-invoice
+    totals hit their target to the paise — this matters for the ₹43,000
+    supplier_default headline."""
+    taxable = int(
+        (Decimal(total_p) / Decimal("1.18")).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+    tax = total_p - taxable
+    cgst = tax // 2
+    sgst = tax - cgst
+    return taxable, cgst, sgst, 0, total_p
+
+
+def _sd_backsolve_inter(total_p: int) -> tuple[int, int, int, int, int]:
+    """Back-solve inter-state (IGST only) so ``taxable + igst == total_p``."""
+    taxable = int(
+        (Decimal(total_p) / Decimal("1.18")).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+    igst = total_p - taxable
+    return taxable, 0, 0, igst, total_p
+
+
+def _sd_backsolve(total_p: int, client_state: str, supplier_gstin: str) -> tuple[int, int, int, int, int]:
+    """Dispatch: intra-state (CGST+SGST) if supplier's state code matches
+    the client, else inter-state (IGST). Malformed GSTINs (whose first two
+    chars aren't a valid state code) fall through to intra — R002 already
+    fires on those and R005 would be noise."""
+    sup_state = (supplier_gstin[:2] if supplier_gstin else "").strip()
+    if sup_state == client_state and sup_state.isdigit():
+        return _sd_backsolve_intra(total_p)
+    if not sup_state.isdigit():
+        # Malformed GSTIN (SD_6). Skip tax-head classification — R002 is
+        # the flag the CA cares about here; splitting into CGST+SGST is
+        # arbitrary but total-preserving.
+        return _sd_backsolve_intra(total_p)
+    return _sd_backsolve_inter(total_p)
+
+
+# HSNs the client would actually book — Ramesh Textiles is a woven-cotton +
+# ready-garment trader. TODO-VERIFY-WITH-CA on the exact HSNs typical for a
+# tier-2 textile MSME (item 1 in Domain verification).
+HSN_COTTON_FABRIC = "5208"   # Woven cotton fabric ≤ 200 g/m²
+HSN_COTTON_HEAVY  = "5209"   # Woven cotton fabric > 200 g/m²
+HSN_TSHIRTS       = "6109"   # T-shirts, singlets and other vests
+HSN_MENS_SUITS    = "6203"   # Men's suits, ensembles, jackets
+
+
+# ---------------------------------------------------------------------------
+# The ten matched invoices — realistic textile-trade line items.
+# Each row is (supplier_key, invoice_num, day, taxable-rupees-str, hsn).
+# Amounts chosen from meters × per-meter rates or pieces × per-piece rates
+# that a real MSME would enter; no round numbers except where a supplier
+# would legitimately round on invoice (e.g. cash-basis vendors).
+#
+# Computed totals (register + 2B mirror each other):
+#     M_1-1  ₹14,367.24    M_1-2  ₹9,613.28
+#     M_2-1  ₹10,684.90    M_2-2  ₹6,467.70
+#     M_3-1  ₹9,058.90     M_3-2  ₹8,081.23
+#     M_4-1  ₹5,800.34     M_4-2  ₹7,911.19
+#     M_5-1  ₹6,734.26     M_5-2  ₹7,089.28
+# Matched-bucket total = ₹85,808.32 (non-round, arithmetic falls out of the line items).
+# ---------------------------------------------------------------------------
+MATCHED_SPEC: list[tuple[str, str, int, str, str]] = [
+    ("M_1", "INV-M_1-1", 10, "12175.63", HSN_COTTON_FABRIC),  # 42.35m × ₹287.50
+    ("M_1", "INV-M_1-2", 20, "8146.85",  HSN_COTTON_HEAVY),   # 24.60m × ₹331.25
+    ("M_2", "INV-M_2-1", 10, "9055.00",  HSN_COTTON_FABRIC),  # cash-basis round rupees
+    ("M_2", "INV-M_2-2", 20, "5481.10",  HSN_TSHIRTS),        # 22 pcs × ₹249.14
+    ("M_3", "INV-M_3-1", 10, "7676.86",  HSN_COTTON_FABRIC),  # rate/qty produces .86
+    ("M_3", "INV-M_3-2", 20, "6848.50",  HSN_COTTON_FABRIC),  # 27.75m × ₹246.85 (rounded)
+    ("M_4", "INV-M_4-1", 10, "4915.54",  HSN_MENS_SUITS),     # 6 pcs × ₹819.26 (fractional)
+    ("M_4", "INV-M_4-2", 20, "6704.40",  HSN_COTTON_HEAVY),   # 19.20m × ₹349.19
+    ("M_5", "INV-M_5-1", 10, "5707.00",  HSN_TSHIRTS),        # 22 pcs × ₹259.41 (rounded)
+    ("M_5", "INV-M_5-2", 20, "6007.86",  HSN_COTTON_FABRIC),  # 21.42m × ₹280.48
+]
+
+
+# ---------------------------------------------------------------------------
+# Two probable-bucket invoices. Register vs 2B drift within fuzzy tolerance:
+# amount drift ~0.5%, date +2 days, invoice number normalizes same after
+# normalize_invoice_number strips separators. Both hit >0.70 confidence.
+# ---------------------------------------------------------------------------
+PROBABLE_REG_P1 = "31847.90"   # register — intra-state 18% split
+PROBABLE_2B_P1  = "31888.60"   # 2B — +₹40.70 on taxable
+PROBABLE_REG_P2 = "41238.65"   # register — inter-state IGST 18%
+PROBABLE_2B_P2  = "41273.65"   # 2B — +₹35 on taxable
+
+
+# ---------------------------------------------------------------------------
+# Six supplier_default invoices. Totals CHOSEN so the six-invoice sum lands
+# on exactly ₹43,000.00 (43_00_000 paise) — that is the headline the pitch
+# hangs on. Individual totals are non-round; the SUM is what the CA verifies.
+# Back-solved via ``_sd_backsolve`` so ``taxable + cgst + sgst == total``
+# for each row.
+#
+#   SD_1  ₹17,924.50  →  taxable + intra-18% = 17924.50 exactly
+#   SD_2  ₹8,478.90
+#   SD_3  ₹5,182.60
+#   SD_4  ₹4,631.20
+#   SD_5  ₹4,118.90
+#   SD_6  ₹2,663.90
+#   Sum   ₹43,000.00 exact
+# ---------------------------------------------------------------------------
+SD_SPEC: list[tuple[str, str, int, str, str, Optional[str]]] = [
+    # (supplier_key_or_gstin_lit, invoice_num, day, target_total_str, sup_gstin_var, hsn)
+    ("SD_1", "INV-SD_1-1", 5,  "17924.50", "SD_1_G", HSN_COTTON_FABRIC),
+    ("SD_2", "INV-SD_2-1", 10, "8478.90",  "SD_2_G", None),                # R004 warning
+    ("SD_3", "INV-SD_3-1", 15, "5182.60",  "SD_3_G", HSN_COTTON_HEAVY),
+    ("SD_4", "INV-SD_4-1", 20, "4631.20",  "SD_4_G", HSN_TSHIRTS),
+    ("SD_5", "INV-SD_5-1", 25, "4118.90",  "SD_5_G", None),                # R004 warning
+    ("SD_6", "INV-SD_6-1", 15, "2663.90",  "SD_6_G", HSN_COTTON_FABRIC),   # R002 (malformed GSTIN)
+]
+
+
 def seed_invoices_and_2b(period: str) -> None:
-    """The main story. All amounts in PAISE (multiply rupees by 100)."""
+    """The main story. All amounts computed in PAISE via Decimal HALF_UP
+    to match the CSV-ingestion rounding exactly.
+
+    ₹43,000.00 supplier_default headline is preserved to the paise; every
+    other bucket total is non-round because it falls out of realistic
+    per-line arithmetic. See ``MATCHED_SPEC`` / ``PROBABLE_*`` / ``SD_SPEC``.
+    """
     year, month = int(period[:4]), int(period[4:])
     d5 = date(year, month, 5)
     d10 = date(year, month, 10)
@@ -284,49 +456,45 @@ def seed_invoices_and_2b(period: str) -> None:
     d20 = date(year, month, 20)
     d25 = date(year, month, 25)
 
+    day_lookup = {5: d5, 10: d10, 15: d15, 20: d20, 25: d25}
+    sd_gstin_lookup = {
+        "SD_1_G": SUPPLIERS["SD_1"],
+        "SD_2_G": SUPPLIERS["SD_2"],
+        "SD_3_G": SUPPLIERS["SD_3"],
+        "SD_4_G": SUPPLIERS["SD_4"],
+        "SD_5_G": SUPPLIERS["SD_5"],
+        "SD_6_G": SD_6_MALFORMED,
+    }
+
     pull_id = uuid.uuid4()
     with owner_engine.begin() as conn:
-        # ----- Register: 10 matched, ₹2,50,000 -----
-        # Two invoices per matched-supplier, matching amounts each.
-        # 5 suppliers × 2 invoices × ₹25,000 = ₹2,50,000.
-        matched_invoices = []
-        for sup_key, sup_gstin in [
-            ("M_1", SUPPLIERS["M_1"]),
-            ("M_2", SUPPLIERS["M_2"]),
-            ("M_3", SUPPLIERS["M_3"]),
-            ("M_4", SUPPLIERS["M_4"]),
-            ("M_5", SUPPLIERS["M_5"]),
-        ]:
-            for i, dt in enumerate([d10, d20], start=1):
-                num = f"INV-{sup_key}-{i}"
-                # ₹25,000 total = ₹21,186 taxable + ₹1,907 cgst + ₹1,907 sgst
-                # (18% intra-state slab, rounded).
-                cgst = sgst = 190_700  # paise
-                taxable = 21_18_600
-                matched_invoices.append(
-                    (num, dt, sup_gstin, taxable, cgst, sgst)
-                )
-                _insert_invoice(
-                    conn, num=num, dt=dt, cp=sup_gstin,
-                    taxable=taxable, cgst=cgst, sgst=sgst,
-                )
+        # ----- Register: 10 matched, non-round per-invoice totals -----
+        matched_records: list[tuple[str, date, str, int, int, int]] = []
+        for sup_key, num, day, taxable_rup, hsn in MATCHED_SPEC:
+            dt = day_lookup[day]
+            sup_gstin = SUPPLIERS[sup_key]
+            taxable_p = _to_paise(taxable_rup)
+            cgst_p, sgst_p, total_p = _intra_18(taxable_p)
+            matched_records.append((num, dt, sup_gstin, taxable_p, cgst_p, sgst_p))
+            _insert_invoice(
+                conn, num=num, dt=dt, cp=sup_gstin,
+                taxable=taxable_p, cgst=cgst_p, sgst=sgst_p, hsn=hsn,
+            )
 
-        # Flag one matched invoice with an R005 (intra-state IGST) — a
-        # common "wrong tax head" error. Override via bound params
-        # (Postgres rejects Python-style underscored numeric literals
-        # inside SQL text).
+        # Flag M_3-1 with R005 (intra-state invoice booked as IGST — a
+        # common "wrong tax head" error). Rewrite the tax columns; the
+        # total lands where 18% IGST on the same taxable would land.
+        m3_1 = next(r for r in matched_records if r[0] == "INV-M_3-1")
+        _, _, _, m3_taxable, _, _ = m3_1
+        m3_igst, m3_total_after = _inter_18(m3_taxable)
         conn.execute(
             text(
                 "UPDATE invoice SET cgst_paise = 0, sgst_paise = 0, "
                 "igst_paise = :igst, total_paise = :total "
                 "WHERE gstin_profile_id = :g AND invoice_number = :num"
             ),
-            {
-                "g": DEMO_GID,
-                "num": "INV-M_3-1",
-                "igst": 381_400,
-                "total": 25_00_000,
-            },
+            {"g": DEMO_GID, "num": "INV-M_3-1",
+             "igst": m3_igst, "total": m3_total_after},
         )
 
         # Missing HSN on 2 matched invoices → R004 warnings.
@@ -339,40 +507,56 @@ def seed_invoices_and_2b(period: str) -> None:
             {"g": DEMO_GID},
         )
 
-        # ----- Register: 2 probable, ₹1,50,000 -----
+        # ----- Register: 2 probable -----
+        p1_taxable = _to_paise(PROBABLE_REG_P1)
+        p1_cgst, p1_sgst, _p1_total = _intra_18(p1_taxable)
         _insert_invoice(
             conn, num="INV-P_1-1", dt=d15, cp=SUPPLIERS["P_1"],
-            taxable=63_55_900, cgst=5_72_050, sgst=5_72_050,
+            taxable=p1_taxable, cgst=p1_cgst, sgst=p1_sgst,
+            hsn=HSN_COTTON_HEAVY,
         )
+        p2_taxable = _to_paise(PROBABLE_REG_P2)
+        p2_igst, _p2_total = _inter_18(p2_taxable)
         _insert_invoice(
             conn, num="INV-P_2-1", dt=d15, cp=SUPPLIERS["P_2"],
-            taxable=63_55_900, cgst=0, sgst=0, igst=11_44_100,
+            taxable=p2_taxable, cgst=0, sgst=0, igst=p2_igst,
+            hsn=HSN_MENS_SUITS,
         )
 
-        # ----- Register: 6 supplier_defaults, ₹43,000 -----
-        # Amounts chosen so sum = 43,000 exactly (criterion #2).
-        # ₹18,000 + ₹8,500 + ₹5,000 + ₹4,500 + ₹4,000 + ₹3,000 = ₹43,000
-        sd_specs = [
-            ("INV-SD_1-1", d5,  SUPPLIERS["SD_1"], 18_00_000, "998311"),
-            ("INV-SD_2-1", d10, SUPPLIERS["SD_2"],  8_50_000, None),      # R004
-            ("INV-SD_3-1", d15, SUPPLIERS["SD_3"],  5_00_000, "998311"),
-            ("INV-SD_4-1", d20, SUPPLIERS["SD_4"],  4_50_000, "998311"),
-            ("INV-SD_5-1", d25, SUPPLIERS["SD_5"],  4_00_000, None),      # R004
-            ("INV-SD_6-1", d15, SD_6_MALFORMED,     3_00_000, "998311"),  # R002
-        ]
-        for num, dt, cp, total_paise, hsn in sd_specs:
-            _insert_invoice(
-                conn, num=num, dt=dt, cp=cp,
-                taxable=total_paise, cgst=0, sgst=0, hsn=hsn,
+        # ----- Register: 6 supplier_defaults, SUM = ₹43,000 exact -----
+        sd_totals: list[int] = []
+        for sup_key, num, day, target_rup, gstin_var, hsn in SD_SPEC:
+            dt = day_lookup[day]
+            total_p = _to_paise(target_rup)
+            sup_gstin = sd_gstin_lookup[gstin_var]
+            # Dispatch by state code: intra when same-state, inter otherwise.
+            # Preserves the ₹43,000 sum invariant regardless of split.
+            taxable_p, cgst_p, sgst_p, igst_p, _ = _sd_backsolve(
+                total_p, client_state="29", supplier_gstin=sup_gstin,
             )
+            sd_totals.append(total_p)
+            _insert_invoice(
+                conn, num=num, dt=dt, cp=sup_gstin,
+                taxable=taxable_p, cgst=cgst_p, sgst=sgst_p, igst=igst_p, hsn=hsn,
+            )
+        # Belt-and-braces: assert the pitch invariant at seed time. If this
+        # ever trips it means someone edited SD_SPEC without checking the sum.
+        assert sum(sd_totals) == 43_00_000, (
+            f"₹43,000 headline invariant broken: sum={sum(sd_totals)} paise"
+        )
 
-        # ----- Register: 3 R001-only invoices, ₹57,000 -----
-        # Missing counterparty_gstin → won't appear in recon (query
-        # filters IS NOT NULL) but will surface R001 errors.
-        for i, dt in enumerate([d5, d15, d25], start=1):
+        # ----- Register: 3 R001-only invoices (missing counterparty) -----
+        # Realistic per-invoice values; excluded from recon by the
+        # counterparty_gstin IS NOT NULL filter, so they only feed R001.
+        for i, (dt, rup) in enumerate(
+            [(d5, "22341.75"), (d15, "18752.60"), (d25, "15906.85")], start=1
+        ):
+            taxable_p = _to_paise(rup)
+            cgst_p, sgst_p, _ = _intra_18(taxable_p)
             _insert_invoice(
                 conn, num=f"INV-NOGSTIN-{i}", dt=dt, cp=None,
-                taxable=19_00_000, cgst=0, sgst=0, hsn="998311",
+                taxable=taxable_p, cgst=cgst_p, sgst=sgst_p,
+                hsn=HSN_COTTON_FABRIC,
             )
 
         # ----- GSTN pull -----
@@ -387,52 +571,58 @@ def seed_invoices_and_2b(period: str) -> None:
         )
 
         # ----- 2B entries -----
-        # For each matched register invoice, insert a matching 2B entry
-        # (same key + same total; intra-state → CGST+SGST).
-        for num, dt, sup, taxable, cgst, sgst in matched_invoices:
+        # For each matched register invoice, mirror on the 2B side (same
+        # key + same total; Pass 1 exact match).
+        for num, dt, sup, taxable_p, cgst_p, sgst_p in matched_records:
             _insert_b2b(
                 conn, pull_id=pull_id, sup=sup, num=num, dt=dt,
-                taxable=taxable, cgst=cgst, sgst=sgst,
+                taxable=taxable_p, cgst=cgst_p, sgst=sgst_p,
             )
 
-        # Probable: slight drift in date + amount vs register.
+        # Probable: date +2 days, invoice number normalizes same, amount
+        # drifts ~0.1% (well inside the 1% fuzzy tolerance).
+        p1_2b_taxable = _to_paise(PROBABLE_2B_P1)
+        p1_2b_cgst, p1_2b_sgst, _ = _intra_18(p1_2b_taxable)
         _insert_b2b(
             conn, pull_id=pull_id, sup=SUPPLIERS["P_1"],
             num="INV/P_1-1",  # normalizes same as INV-P_1-1
             dt=d15 + timedelta(days=2),
-            taxable=63_60_000, cgst=5_72_400, sgst=5_72_400,  # +~₹200 on total
+            taxable=p1_2b_taxable, cgst=p1_2b_cgst, sgst=p1_2b_sgst,
         )
+        p2_2b_taxable = _to_paise(PROBABLE_2B_P2)
+        p2_2b_igst, _ = _inter_18(p2_2b_taxable)
         _insert_b2b(
             conn, pull_id=pull_id, sup=SUPPLIERS["P_2"],
             num="INV-P_2/1",
             dt=d15 + timedelta(days=2),
-            taxable=63_60_000, cgst=0, sgst=0, igst=11_45_000,
+            taxable=p2_2b_taxable, cgst=0, sgst=0, igst=p2_2b_igst,
         )
 
-        # Near-miss 2B entries for SD_2 and SD_4 — same supplier, same
-        # normalized number, but amount well outside fuzzy tolerance so
-        # they don't fuzzy-match. Pass 3 surfaces them as near-misses
-        # AND (per engine design) also as missing_entry residuals since
-        # near-misses don't consume the 2B row. Kept tiny (₹5, ₹3) so
-        # the missing_entry paise headline stays dominated by the real
-        # fat GHOST entry below.
+        # Near-miss 2B rows for SD_2 and SD_4 — same supplier + same
+        # normalized invoice number, but amount OUTSIDE fuzzy tolerance
+        # so they surface as near_misses attached to the supplier_default
+        # match_result (and independently as missing_entry residuals —
+        # engine design; near-misses don't consume the 2B row). Amounts
+        # kept small so they don't distort missing_entry paise.
         _insert_b2b(
             conn, pull_id=pull_id, sup=SUPPLIERS["SD_2"],
             num="INV-SD_2-1", dt=d10,
-            taxable=500,   # ₹5 — trivially small
+            taxable=_to_paise("4.72"),   # ₹4.72 — tiny + odd
         )
         _insert_b2b(
             conn, pull_id=pull_id, sup=SUPPLIERS["SD_4"],
             num="INV-SD_4-1", dt=d20,
-            taxable=300,   # ₹3 — trivially small
+            taxable=_to_paise("2.85"),   # ₹2.85 — tiny + odd
         )
 
-        # The fat missing_entry — 2B has a big invoice from a supplier
-        # the client never recorded.
+        # Fat missing_entry — 2B has a big invoice from a supplier the
+        # client never recorded. Non-round taxable × 18% IGST.
+        ghost_taxable = _to_paise("105846.35")
+        ghost_igst, _ = _inter_18(ghost_taxable)
         _insert_b2b(
             conn, pull_id=pull_id, sup=SUPPLIERS["MISSING"],
             num="INV-GHOST-BIG", dt=d15,
-            taxable=1_20_00_000,  # ₹1,20,000
+            taxable=ghost_taxable, cgst=0, sgst=0, igst=ghost_igst,
         )
 
 
@@ -530,10 +720,32 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"    Validation errors     : {errors}")
     print(f"    Validation warnings   : {warnings}")
     sd = summary.get("supplier_default", {})
-    print(f"    Matched paise         : ₹{summary.get('matched', {}).get('paise', 0) // 100:,}")
-    print(f"    Probable paise        : ₹{summary.get('probable', {}).get('paise', 0) // 100:,}")
-    print(f"    Supplier_default paise: ₹{sd.get('paise', 0) // 100:,} across {sd.get('count', 0)} suppliers")
-    print(f"    Missing_entry paise   : ₹{summary.get('missing_entry', {}).get('paise', 0) // 100:,}")
+
+    def _p(rupees_and_paise: int) -> str:
+        """Format integer paise as ``₹1,23,456.78`` (Indian grouping).
+        Preserves paise precision — CAs verify these to the paise."""
+        neg = rupees_and_paise < 0
+        v = abs(int(rupees_and_paise))
+        rupees, paise = divmod(v, 100)
+        s = str(rupees)
+        if len(s) > 3:
+            head, tail = s[:-3], s[-3:]
+            groups = []
+            while len(head) > 2:
+                groups.insert(0, head[-2:])
+                head = head[:-2]
+            if head:
+                groups.insert(0, head)
+            grouped = ",".join(groups) + "," + tail
+        else:
+            grouped = s
+        return ("-" if neg else "") + f"₹{grouped}.{paise:02d}"
+
+    print(f"    Matched paise         : {_p(summary.get('matched', {}).get('paise', 0))}")
+    print(f"      of which claimable  : {_p(summary.get('matched', {}).get('paise_claimable', 0))}")
+    print(f"    Probable paise        : {_p(summary.get('probable', {}).get('paise', 0))}")
+    print(f"    Supplier_default paise: {_p(sd.get('paise', 0))} across {sd.get('count', 0)} suppliers")
+    print(f"    Missing_entry paise   : {_p(summary.get('missing_entry', {}).get('paise', 0))}")
     print(f"    ⚠ ITC figures are '{summary.get('disclaimer', '(no disclaimer)')}'")
     print("=" * 72)
     return 0
