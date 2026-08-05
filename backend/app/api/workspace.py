@@ -272,31 +272,64 @@ def list_matches(
     _: AppUser = Depends(get_current_user),
     session=Depends(get_firm_scoped_session),
 ) -> list[MatchRow]:
+    # We LEFT JOIN invoice + b2b_entry to surface supplier_gstin into
+    # the row's context — the supplier-chase UI needs it for the
+    # /supplier-contacts/by-gstin/{...} prefill lookup, and it is
+    # cheaper to join here once than to require a per-row invoice fetch
+    # from the frontend. The value is merged into context (not a
+    # top-level column) so the UI's existing shape stays stable.
     sql = (
-        "SELECT id, bucket::text, confidence, invoice_id, b2b_entry_id, "
-        "confirmed_by, confirmed_at, rejected, context "
-        "FROM match_result WHERE run_id = :r"
+        "SELECT mr.id, mr.bucket::text AS bucket, mr.confidence, "
+        "  mr.invoice_id, mr.b2b_entry_id, "
+        "  mr.confirmed_by, mr.confirmed_at, mr.rejected, mr.context, "
+        "  COALESCE(i.counterparty_gstin, be.supplier_gstin) AS supplier_gstin, "
+        "  i.invoice_number AS register_invoice_number, "
+        "  i.invoice_date AS register_invoice_date, "
+        "  i.total_paise AS register_total_paise "
+        "FROM match_result mr "
+        "LEFT JOIN invoice i ON i.id = mr.invoice_id "
+        "LEFT JOIN b2b_entry be ON be.id = mr.b2b_entry_id "
+        "WHERE mr.run_id = :r"
     )
     params: dict = {"r": str(run_id)}
     if bucket:
-        sql += " AND bucket = CAST(:bucket AS match_bucket)"
+        sql += " AND mr.bucket = CAST(:bucket AS match_bucket)"
         params["bucket"] = bucket
-    sql += " ORDER BY bucket, confidence DESC"
+    sql += " ORDER BY mr.bucket, mr.confidence DESC"
     rows = session.execute(text(sql), params).mappings().all()
-    return [
-        MatchRow(
-            id=r["id"],
-            bucket=r["bucket"],
-            confidence=float(r["confidence"]),
-            invoice_id=r["invoice_id"],
-            b2b_entry_id=r["b2b_entry_id"],
-            confirmed_by=r["confirmed_by"],
-            confirmed_at=r["confirmed_at"],
-            rejected=r["rejected"],
-            context=dict(r["context"] or {}),
+
+    out: list[MatchRow] = []
+    for r in rows:
+        ctx = dict(r["context"] or {})
+        # Merge joined columns into context — never overwrite an
+        # already-present key (the engine's near-miss data wins if
+        # somehow set from both sides).
+        if r["supplier_gstin"] and "supplier_gstin" not in ctx:
+            ctx["supplier_gstin"] = r["supplier_gstin"]
+        if r["register_invoice_number"] and "register_invoice_number" not in ctx:
+            ctx["register_invoice_number"] = r["register_invoice_number"]
+        if r["register_invoice_date"] and "register_invoice_date" not in ctx:
+            ctx["register_invoice_date"] = (
+                r["register_invoice_date"].isoformat()
+                if hasattr(r["register_invoice_date"], "isoformat")
+                else str(r["register_invoice_date"])
+            )
+        if r["register_total_paise"] is not None and "register_total_paise" not in ctx:
+            ctx["register_total_paise"] = int(r["register_total_paise"])
+        out.append(
+            MatchRow(
+                id=r["id"],
+                bucket=r["bucket"],
+                confidence=float(r["confidence"]),
+                invoice_id=r["invoice_id"],
+                b2b_entry_id=r["b2b_entry_id"],
+                confirmed_by=r["confirmed_by"],
+                confirmed_at=r["confirmed_at"],
+                rejected=r["rejected"],
+                context=ctx,
+            )
         )
-        for r in rows
-    ]
+    return out
 
 
 @router.post("/match-results/{match_id}/confirm", status_code=status.HTTP_200_OK)

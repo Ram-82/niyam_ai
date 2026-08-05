@@ -27,6 +27,7 @@ from app.db import owner_engine
 TRUNCATE_ORDER = (
     "delivery_attempt",
     "delivery_request",
+    "supplier_contact",
     "match_result",
     "reconciliation_run",
     "b2b_entry",

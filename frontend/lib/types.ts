@@ -322,3 +322,22 @@ export interface DeliverySendResponse {
   provider_message_id: string;
   status: DeliveryStatus;
 }
+
+
+// ---------------------------------------------------------------------------
+// Supplier contact directory (P2)
+// ---------------------------------------------------------------------------
+
+
+export interface SupplierContactRow {
+  id: string;
+  supplier_gstin: string;
+  name: string;
+  whatsapp_number: string | null;
+  email: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string;
+}

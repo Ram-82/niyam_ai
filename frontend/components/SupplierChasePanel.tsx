@@ -35,6 +35,7 @@ import type {
   DeliverySendResponse,
   MatchResult,
   NarrationLanguage,
+  SupplierContactRow,
 } from "@/lib/types";
 
 
@@ -78,6 +79,8 @@ export function SupplierChasePanel({
     }
   }
 
+  const [prefill, setPrefill] = useState<SupplierContactRow | null>(null);
+
   async function openChase() {
     setError(null);
     // Peek /whatsapp/attempts once so we can flip to disabled if the
@@ -86,12 +89,34 @@ export function SupplierChasePanel({
       const rows = await api<DeliveryAttemptRow[]>(
         `/whatsapp/attempts?limit=25`,
       );
-      // Filter to attempts against THIS match_result's delivery requests.
-      // We don't have a server-side filter yet; the request-id filter
-      // is the closest thing, but we haven't captured any request ids
-      // for this row. Show all firm-scoped attempts for now; the CA
-      // sees the wider context in the returns tab's DeliveryPanel too.
       setAttempts(rows);
+      // Try the supplier-contacts prefill lookup by GSTIN. A 404 is
+      // expected for a supplier not yet in the directory; treat as
+      // "no prefill" (silent). Any other error is a real failure worth
+      // showing — but we still open the modal so the CA can proceed.
+      const gstin = match.context.supplier_gstin;
+      if (gstin) {
+        try {
+          const contact = await api<SupplierContactRow>(
+            `/supplier-contacts/by-gstin/${gstin}`,
+          );
+          setPrefill(contact);
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 404) {
+            setPrefill(null);
+          } else {
+            // Log via the error strip but let the modal open — the CA
+            // can still send by typing the number.
+            setError(
+              `Supplier directory lookup failed: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            );
+          }
+        }
+      } else {
+        setPrefill(null);
+      }
       setState({ kind: "preparing" });
     } catch (e) {
       if (e instanceof ApiError && e.status === 503) {
@@ -105,9 +130,50 @@ export function SupplierChasePanel({
   async function submitChase(payload: {
     whatsappNumber: string;
     language: NarrationLanguage;
+    saveToDirectory: boolean;
+    directoryName: string;
   }) {
     setError(null);
     try {
+      // If the CA opted to save + we don't already have a contact for
+      // this supplier, insert/update the directory row FIRST — that way
+      // even if the send fails downstream, the directory entry is on
+      // record and prefills next time. 409 (already exists) is fine —
+      // it means the CA is chasing a supplier already in the directory.
+      const gstin = match.context.supplier_gstin;
+      if (payload.saveToDirectory && gstin) {
+        try {
+          const saved = await api<SupplierContactRow>("/supplier-contacts", {
+            method: "POST",
+            body: {
+              supplier_gstin: gstin,
+              name: payload.directoryName || gstin,
+              whatsapp_number: payload.whatsappNumber,
+            },
+          });
+          setPrefill(saved);
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 409) {
+            // Already in directory — PATCH the number in case it changed.
+            if (prefill) {
+              await api(`/supplier-contacts/${prefill.id}`, {
+                method: "PATCH",
+                body: { whatsapp_number: payload.whatsappNumber },
+              });
+            }
+          } else {
+            // Non-fatal: log via error strip but still proceed with the
+            // chase send (the directory-save is a convenience, not a
+            // precondition).
+            setError(
+              `Saving to directory failed: ${
+                e instanceof Error ? e.message : String(e)
+              }. Proceeding with chase send.`,
+            );
+          }
+        }
+      }
+
       const created = await api<DeliveryRequestCreatedResponse>(
         "/whatsapp/delivery-requests/chase",
         {
@@ -205,6 +271,7 @@ export function SupplierChasePanel({
       {state.kind === "preparing" && (
         <ChaseModal
           match={match}
+          prefill={prefill}
           onCancel={() => setState({ kind: "reviewed" })}
           onSubmit={submitChase}
         />
@@ -225,18 +292,27 @@ export function SupplierChasePanel({
 
 function ChaseModal({
   match,
+  prefill,
   onCancel,
   onSubmit,
 }: {
   match: MatchResult;
+  prefill: SupplierContactRow | null;
   onCancel: () => void;
   onSubmit: (payload: {
     whatsappNumber: string;
     language: NarrationLanguage;
+    saveToDirectory: boolean;
+    directoryName: string;
   }) => void;
 }) {
-  const [number, setNumber] = useState("");
+  const [number, setNumber] = useState(prefill?.whatsapp_number ?? "");
   const [language, setLanguage] = useState<NarrationLanguage>("en");
+  // Default: opt-in to save when this is a NEW supplier (no prefill),
+  // opt-out when we already had a directory entry (the CA presumably
+  // just wants to send with the on-file number).
+  const [saveToDirectory, setSaveToDirectory] = useState(prefill === null);
+  const [directoryName, setDirectoryName] = useState(prefill?.name ?? "");
   const [submitting, setSubmitting] = useState(false);
 
   const validE164 = /^\+[1-9]\d{7,14}$/.test(number.trim());
@@ -258,6 +334,11 @@ function ChaseModal({
         <div className="text-xs bg-paper border border-rule rounded-sm p-2">
           <span className="text-ink-muted">Supplier GSTIN:</span>{" "}
           <span className="font-mono text-ink">{supplierGstin}</span>
+          {prefill && (
+            <span className="ml-2 text-green-fg font-semibold">
+              · prefilled from directory ({prefill.name})
+            </span>
+          )}
         </div>
       )}
 
@@ -300,17 +381,55 @@ function ChaseModal({
         </label>
       </div>
 
+      {supplierGstin && (
+        <label className="flex items-start gap-2 text-xs text-ink">
+          <input
+            type="checkbox"
+            checked={saveToDirectory}
+            onChange={(e) => setSaveToDirectory(e.target.checked)}
+            className="mt-0.5"
+            data-testid="save-to-directory"
+          />
+          <span>
+            {prefill
+              ? "Update this supplier in your directory if the number changed."
+              : "Save this supplier to your firm's directory so the next chase prefills."}
+            {saveToDirectory && !prefill && (
+              <span className="block mt-1">
+                <input
+                  type="text"
+                  value={directoryName}
+                  onChange={(e) => setDirectoryName(e.target.value)}
+                  placeholder="Supplier name (e.g. Ravi Textiles)"
+                  className="border border-rule rounded-sm px-2 py-1 text-sm bg-paper w-full max-w-sm"
+                  data-testid="directory-name"
+                />
+              </span>
+            )}
+          </span>
+        </label>
+      )}
+
       <div className="flex gap-3">
         <button
           onClick={async () => {
             setSubmitting(true);
             try {
-              await onSubmit({ whatsappNumber: number.trim(), language });
+              await onSubmit({
+                whatsappNumber: number.trim(),
+                language,
+                saveToDirectory: !!supplierGstin && saveToDirectory,
+                directoryName: directoryName.trim(),
+              });
             } finally {
               setSubmitting(false);
             }
           }}
-          disabled={!validE164 || submitting}
+          disabled={
+            !validE164
+            || submitting
+            || (saveToDirectory && !prefill && !directoryName.trim())
+          }
           className="px-4 py-2 bg-accent text-paper-raised font-semibold rounded-sm hover:bg-accent-hover transition-colors duration-fast disabled:opacity-50"
           data-testid="approve-and-send-chase"
         >

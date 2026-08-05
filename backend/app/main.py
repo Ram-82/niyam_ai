@@ -21,6 +21,7 @@ from app.api.gsp import router as gsp_router
 from app.api.imports import router as imports_router
 from app.api.invites import router as invites_router
 from app.api.narrator import router as narrator_router
+from app.api.supplier_contacts import router as supplier_contacts_router
 from app.api.whatsapp import router as whatsapp_router
 from app.api.workspace import router as workspace_router
 from app.auth.revocation import _redis
@@ -72,6 +73,7 @@ app.include_router(admin_router)
 app.include_router(gsp_router)
 app.include_router(narrator_router)
 app.include_router(whatsapp_router)
+app.include_router(supplier_contacts_router)
 
 
 @app.get("/health")

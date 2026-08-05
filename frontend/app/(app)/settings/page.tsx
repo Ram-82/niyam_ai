@@ -132,6 +132,14 @@ export default function SettingsPage() {
         title="Firm settings"
         context="Manage staff, client assignments, and firm preferences."
       />
+      <nav className="text-xs flex gap-4">
+        <a
+          href="/settings/suppliers"
+          className="text-accent hover:text-accent-hover hover:underline font-semibold"
+        >
+          Supplier directory →
+        </a>
+      </nav>
       {message && (
         <p
           className={
