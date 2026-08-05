@@ -144,6 +144,54 @@ export const RATE_LIMIT_COPY = {
 } as const;
 
 /**
+ * Delivery status → user-facing copy. Shape-locked: adding a status
+ * requires a matching key here or the DeliveryPanel will render
+ * "Unknown status", which is louder than silence but still bad UX.
+ */
+export const DELIVERY_STATUS_COPY: Record<
+  string,
+  { label: string; tone: "muted" | "ok" | "warn" | "bad" }
+> = {
+  queued: { label: "Queued", tone: "muted" },
+  sent: { label: "Sent", tone: "ok" },
+  delivered: { label: "Delivered", tone: "ok" },
+  read: { label: "Read", tone: "ok" },
+  failed: { label: "Failed", tone: "bad" },
+};
+
+
+/**
+ * WhatsApp error kind → user-facing copy. Same shape-locked rules as
+ * FAILED_PULL_REASON: state WHAT happened, WHY it's stuck, brief WHAT
+ * to do. Never "contact support".
+ */
+export const WHATSAPP_ERROR_COPY: Record<string, string> = {
+  template_not_approved:
+    "The WhatsApp template for this message is not approved on the sender WABA. Submit or wait for Meta review before retrying.",
+  invalid_number:
+    "The destination number was rejected by WhatsApp. Verify the client's WhatsApp-enabled E.164 number and create a new delivery request.",
+  rate_limited:
+    "WhatsApp rate limit hit. Wait and retry with a new delivery request; back-to-back sends to the same number trip this.",
+  meta_5xx:
+    "WhatsApp's Cloud API returned a server error. Create a new delivery request and retry.",
+  other:
+    "Delivery failed with an unclassified error. Create a new delivery request and retry.",
+};
+
+
+/**
+ * The narrator language codes as user-facing labels. Used in the
+ * language select on the delivery preparation modal.
+ */
+export const NARRATION_LANGUAGE_LABELS: Record<string, string> = {
+  en: "English",
+  hi: "Hindi",
+  kn: "Kannada",
+  mr: "Marathi",
+};
+
+
+/**
  * The command-center default period is the last complete calendar
  * month (Asia/Kolkata). Server also computes this; front-end mirrors
  * so links / bookmarks work.

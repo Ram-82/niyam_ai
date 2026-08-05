@@ -15,6 +15,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { SkeletonTable } from "@/components/Skeleton";
 import { PageHeader } from "@/components/PageHeader";
 import { ConnectionsPanel } from "@/components/ConnectionsPanel";
+import { DeliveryPanel } from "@/components/DeliveryPanel";
 import { formatDateIN, formatPeriod, formatTimestampIN } from "@/lib/format-date";
 import { bucketTint } from "@/lib/design-tokens";
 import type {
@@ -472,6 +473,18 @@ function ReturnsTab({
         <h2 className="text-sm font-semibold text-ink mb-2">Blockers</h2>
         <BlockersList blockers={snap.blockers} />
       </div>
+
+      {/* Client 2-pager delivery — sits at the tail of the returns tab
+          so the CA hits it after reviewing score + blockers, in that
+          order. Only rendered once a snapshot exists (guards against
+          the "generate narration with no facts" 409). */}
+      {snap.snapshot_id && (
+        <DeliveryPanel
+          gstinProfileId={gid}
+          period={period}
+          returnType={returnType}
+        />
+      )}
     </div>
   );
 }

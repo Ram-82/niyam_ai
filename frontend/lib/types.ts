@@ -230,3 +230,78 @@ export interface GspPullAttempt {
   finished_at: string | null;
   next_retry_at: string | null;
 }
+
+
+// ---------------------------------------------------------------------------
+// Narrator (P2)
+// ---------------------------------------------------------------------------
+
+
+export type NarrationLanguage = "en" | "hi" | "kn" | "mr";
+
+export interface NarrationOutput {
+  narration_run_id: string;
+  provider: string;
+  model: string;
+  language: NarrationLanguage;
+  page1_health: string;
+  page1_tax_position: string;
+  page2_attention: string;
+  page2_ask_your_ca: string;
+}
+
+export interface NarrationRunRow {
+  id: string;
+  gstin_profile_id: string;
+  return_type: "GSTR1" | "GSTR3B";
+  period: string;
+  language: NarrationLanguage;
+  provider: string;
+  model: string;
+  generated_at: string;
+}
+
+
+// ---------------------------------------------------------------------------
+// WhatsApp delivery (P2)
+// ---------------------------------------------------------------------------
+
+
+export type DeliveryStatus =
+  | "queued"
+  | "sent"
+  | "delivered"
+  | "read"
+  | "failed";
+
+export type WhatsAppErrorKind =
+  | "template_not_approved"
+  | "invalid_number"
+  | "rate_limited"
+  | "meta_5xx"
+  | "other";
+
+export interface DeliveryAttemptRow {
+  id: string;
+  delivery_request_id: string;
+  provider: string;
+  status: DeliveryStatus;
+  provider_message_id: string | null;
+  error_kind: WhatsAppErrorKind | null;
+  error_message: string | null;
+  attempted_at: string;
+  delivered_at: string | null;
+  read_at: string | null;
+  failed_at: string | null;
+}
+
+export interface DeliveryRequestCreatedResponse {
+  delivery_request_id: string;
+}
+
+export interface DeliverySendResponse {
+  attempt_id: string;
+  provider: string;
+  provider_message_id: string;
+  status: DeliveryStatus;
+}
