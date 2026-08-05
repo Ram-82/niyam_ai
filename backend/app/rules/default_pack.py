@@ -46,6 +46,31 @@ PAYLOAD: dict[str, Any] = {
             "amount_closeness": 0.25,
         },
     },
+    "gsp": {
+        # Day of the month (in the following month, IST) after which
+        # GSTN's IMS-era 2B is expected to be generated. The scheduler
+        # skips (gstin, period) pairs whose period has not yet crossed
+        # this threshold.
+        # TODO-VERIFY-WITH-CA: confirm exact IMS-era 2B generation
+        # cutoff; historically the 14th, but the IMS rollout (Nov 2024)
+        # may have shifted the timing. Off by even a day means we hammer
+        # the vendor before 2B exists.
+        "2b_generation_day": 14,
+        # When a CA connects a GSTIN, offer to backfill the last N
+        # already-generated periods (user-triggered — each period runs
+        # through the same Pull-now path). 3 covers most demo/onboarding
+        # scenarios without blowing up the vendor call budget.
+        "backfill_periods": 3,
+        # Retry policy for the pull path. Applies ONLY to GSTN_UNAVAILABLE
+        # and RATE_LIMITED per the taxonomy.
+        "retry": {
+            "max_attempts": 3,
+            "gstn_unavailable_backoff_seconds": [30, 120, 600],
+            # For RATE_LIMITED, Retry-After from the vendor wins; this is
+            # the floor if the vendor sends no header.
+            "rate_limited_default_seconds": 30,
+        },
+    },
     "scoring": {
         "weights": {
             "validation_pass_rate": 25,
@@ -67,5 +92,7 @@ PAYLOAD: dict[str, Any] = {
         "TODO-VERIFY-WITH-CA: scoring weights + days-to-due-date modifier curve",
         "TODO-VERIFY-WITH-CA: due dates for GSTR1/GSTR3B by scheme",
         "TODO-VERIFY-WITH-CA: CDN (credit/debit note) handling — deferred to P2, ITC summaries labeled 'before CDN adjustments'",
+        "TODO-VERIFY-WITH-CA: gsp.2b_generation_day — IMS-era timing may differ from the historical 14th",
+        "TODO-VERIFY-WITH-CA: gsp.retry backoff schedule — depends on vendor rate-limit behavior once we hold sandbox creds",
     ],
 }

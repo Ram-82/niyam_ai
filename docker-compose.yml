@@ -39,6 +39,8 @@ services:
       APP_DATABASE_URL: postgresql+psycopg://niyam:niyam@postgres:5432/niyam
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /data/uploads
+      GSP_MODE: mock
+      GSP_BASE_URL: http://gsp-mock:9000
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,6 +62,8 @@ services:
       APP_DATABASE_URL: postgresql+psycopg://niyam:niyam@postgres:5432/niyam
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /data/uploads
+      GSP_MODE: mock
+      GSP_BASE_URL: http://gsp-mock:9000
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,6 +84,8 @@ services:
       APP_DATABASE_URL: postgresql+psycopg://niyam:niyam@postgres:5432/niyam
       REDIS_URL: redis://redis:6379/0
       UPLOAD_DIR: /data/uploads
+      GSP_MODE: mock
+      GSP_BASE_URL: http://gsp-mock:9000
     ports:
       - "8000:8000"
     depends_on:
@@ -87,6 +93,24 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # Local mock of a GSP (GST Suvidha Provider). See app/gsp/mock_server.py.
+  # First-class citizen — every automated e2e / integration test hits this
+  # until we hold real GSP sandbox credentials. Same image as backend so
+  # it always has the fixtures under /app/app/gsp/fixtures.
+  gsp-mock:
+    build: ./backend
+    working_dir: /app
+    command: uvicorn app.gsp.mock_server:app --host 0.0.0.0 --port 9000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9000/health').read()\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   # Next.js dev server.
   frontend:

@@ -152,6 +152,13 @@ def parse_gstr2b_json(
 
             itc_flag = str(inv.get("itcavl") or "Y").upper() == "Y"
 
+            # IMS passthrough — carry the GSTN fields to storage without
+            # interpreting them. Both are optional; pre-IMS payloads omit.
+            ims_action_raw = inv.get("imsactn")
+            ims_status_raw = inv.get("imsts")
+            ims_action = str(ims_action_raw).strip() if ims_action_raw else None
+            ims_status = str(ims_status_raw).strip() if ims_status_raw else None
+
             entries.append(
                 CanonicalB2BEntry(
                     gstn_pull_id=gstn_pull_id,
@@ -165,6 +172,8 @@ def parse_gstr2b_json(
                     cess_paise=cess,
                     itc_available=itc_flag,
                     note_type=None,  # CDN handled in P2
+                    ims_status=ims_status,
+                    ims_action=ims_action,
                 )
             )
 

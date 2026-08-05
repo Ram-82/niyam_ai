@@ -1,0 +1,46 @@
+{
+  "_niyam_fixture_notes": [
+    "Prior-period (May 2026) 2B for the same supplier — used to test scheduler date logic and month-to-month period selection."
+  ],
+  "data": {
+    "rtnprd": "052026",
+    "gendt": "14-06-2026",
+    "gstin": "29ZZZZZ9999Z9Z9",
+    "chksum": "niyam-mock-fixture-v1-may",
+    "docdata": {
+      "b2b": [
+        {
+          "ctin": "29AAAAA0000A1Z5",
+          "trdnm": "Karnataka Traders Pvt Ltd",
+          "supfildt": "11-06-2026",
+          "supprd": "052026",
+          "inv": [
+            {
+              "inum": "INV-2026-050",
+              "idt": "07-05-2026",
+              "val": 2360,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 2000,
+                  "camt": 180,
+                  "samt": 180,
+                  "iamt": 0,
+                  "csamt": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

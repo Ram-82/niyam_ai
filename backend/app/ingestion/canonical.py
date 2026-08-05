@@ -174,6 +174,10 @@ class CanonicalB2BEntry:
     cess_paise: int
     itc_available: bool
     note_type: Optional[str] = None  # 'credit_note' | 'debit_note' | None
+    # IMS passthrough. Stored on b2b_entry.ims_status / ims_action; no
+    # engine consumes them yet. See README "IMS-era 2B semantics" TODO.
+    ims_status: Optional[str] = None
+    ims_action: Optional[str] = None
 
     @property
     def tax_paise_breakdown(self) -> dict[str, int]:

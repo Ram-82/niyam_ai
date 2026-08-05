@@ -1,0 +1,141 @@
+{
+  "_niyam_fixture_notes": [
+    "P2.1 STAGE A — ADVERSARIAL RECONCILIATION FIXTURE. NOT FOR DEMO.",
+    "Ten targeted cases designed to break the matcher or surface limitations:",
+    "  A1  1-paise difference in taxable value (should still match, tolerance=100p)",
+    "  A2  1-paise difference in tax amount only (should still match)",
+    "  A3  Same invoice number under two different supplier GSTINs",
+    "  A4  Supplier GSTIN one character different from register (typo)",
+    "  A5  Invoice in 2B only, no register counterpart",
+    "  A6  Invoice in register only, no 2B counterpart — asserted in test, no 2B row here",
+    "  A7  Credit note — NOT in this fixture; parser drops cdnr today (P1 limitation).",
+    "      Test inserts a b2b_entry with note_type='credit_note' directly.",
+    "  A8  Invoice date in %d/%m/%Y format (parser accepts three formats)",
+    "  A9  Exact duplicate invoice appearing twice within same 2B payload",
+    "  A10 Taxable matches but CGST+SGST vs IGST split differs; totals equal"
+  ],
+  "data": {
+    "rtnprd": "072026",
+    "gendt": "14-08-2026",
+    "gstin": "29ADVRS0000A1ZA",
+    "chksum": "adversarial-v1",
+    "docdata": {
+      "b2b": [
+        {
+          "ctin": "29PPPPP0000A1ZP",
+          "trdnm": "Adv-P (A1, A2)",
+          "supfildt": "10-08-2026",
+          "supprd": "072026",
+          "inv": [
+            {
+              "inum": "INV-A1", "idt": "05-07-2026", "val": 1180.01,
+              "pos": "29", "rev": "N", "itcavl": "Y", "rsn": "P", "srctyp": "e-Invoice",
+              "items": [{"num": 1, "rt": 18, "txval": 1000.01, "camt": 90.00, "samt": 90.00, "iamt": 0, "csamt": 0}]
+            },
+            {
+              "inum": "INV-A2", "idt": "05-07-2026", "val": 1180.01,
+              "pos": "29", "rev": "N", "itcavl": "Y", "rsn": "P", "srctyp": "e-Invoice",
+              "items": [{"num": 1, "rt": 18, "txval": 1000.00, "camt": 90.01, "samt": 90.00, "iamt": 0, "csamt": 0}]
+            }
+          ]
+        },
+        {
+          "ctin": "29QQQQQ0000A1ZQ",
+          "trdnm": "Adv-Q (A3 same-supplier of INV-DUP)",
+          "supfildt": "10-08-2026",
+          "supprd": "072026",
+          "inv": [
+            {
+              "inum": "INV-DUP", "idt": "05-07-2026", "val": 1000.00,
+              "pos": "29", "rev": "N", "itcavl": "Y", "rsn": "P", "srctyp": "e-Invoice",
+              "items": [{"num": 1, "rt": 0, "txval": 1000.00, "camt": 0, "samt": 0, "iamt": 0, "csamt": 0}]
+            }
+          ]
+        },
+        {
+          "ctin": "29NNNNN0000A1ZN",
+          "trdnm": "Adv-N (A3 collision-supplier of INV-DUP)",
+          "supfildt": "10-08-2026",
+          "supprd": "072026",
+          "inv": [
+            {
+              "inum": "INV-DUP", "idt": "05-07-2026", "val": 1000.00,
+              "pos": "29", "rev": "N", "itcavl": "Y", "rsn": "P", "srctyp": "e-Invoice",
+              "items": [{"num": 1, "rt": 0, "txval": 1000.00, "camt": 0, "samt": 0, "iamt": 0, "csamt": 0}]
+            }
+          ]
+        },
+        {
+          "ctin": "29RRSRR0000A1ZR",
+          "trdnm": "Adv-Rtypo (A4 — one char different from register's 29RRRRR0000A1ZR)",
+          "supfildt": "10-08-2026",
+          "supprd": "072026",
+          "inv": [
+            {
+              "inum": "INV-A4", "idt": "05-07-2026", "val": 1000.00,
+              "pos": "29", "rev": "N", "itcavl": "Y", "rsn": "P", "srctyp": "e-Invoice",
+              "items": [{"num": 1, "rt": 0, "txval": 1000.00, "camt": 0, "samt": 0, "iamt": 0, "csamt": 0}]
+            }
+          ]
+        },
+        {
+          "ctin": "29WWWWW0000A1ZW",
+          "trdnm": "Adv-W (A5 — 2B only, no register)",
+          "supfildt": "10-08-2026",
+          "supprd": "072026",
+          "inv": [
+            {
+              "inum": "INV-A5", "idt": "05-07-2026", "val": 1000.00,
+              "pos": "29", "rev": "N", "itcavl": "Y", "rsn": "P", "srctyp": "e-Invoice",
+              "items": [{"num": 1, "rt": 0, "txval": 1000.00, "camt": 0, "samt": 0, "iamt": 0, "csamt": 0}]
+            }
+          ]
+        },
+        {
+          "ctin": "29TTTTT0000A1ZT",
+          "trdnm": "Adv-T (A8 — date in %d/%m/%Y format)",
+          "supfildt": "10-08-2026",
+          "supprd": "072026",
+          "inv": [
+            {
+              "inum": "INV-A8", "idt": "05/07/2026", "val": 1000.00,
+              "pos": "29", "rev": "N", "itcavl": "Y", "rsn": "P", "srctyp": "e-Invoice",
+              "items": [{"num": 1, "rt": 0, "txval": 1000.00, "camt": 0, "samt": 0, "iamt": 0, "csamt": 0}]
+            }
+          ]
+        },
+        {
+          "ctin": "29UUUUU0000A1ZU",
+          "trdnm": "Adv-U (A9 — duplicate 2B rows)",
+          "supfildt": "10-08-2026",
+          "supprd": "072026",
+          "inv": [
+            {
+              "inum": "INV-A9", "idt": "05-07-2026", "val": 1000.00,
+              "pos": "29", "rev": "N", "itcavl": "Y", "rsn": "P", "srctyp": "e-Invoice",
+              "items": [{"num": 1, "rt": 0, "txval": 1000.00, "camt": 0, "samt": 0, "iamt": 0, "csamt": 0}]
+            },
+            {
+              "inum": "INV-A9", "idt": "05-07-2026", "val": 1000.00,
+              "pos": "29", "rev": "N", "itcavl": "Y", "rsn": "P", "srctyp": "e-Invoice",
+              "items": [{"num": 1, "rt": 0, "txval": 1000.00, "camt": 0, "samt": 0, "iamt": 0, "csamt": 0}]
+            }
+          ]
+        },
+        {
+          "ctin": "29VVVVV0000A1ZV",
+          "trdnm": "Adv-V (A10 — CGST+SGST vs IGST tax split)",
+          "supfildt": "10-08-2026",
+          "supprd": "072026",
+          "inv": [
+            {
+              "inum": "INV-A10", "idt": "05-07-2026", "val": 1180.00,
+              "pos": "27", "rev": "N", "itcavl": "Y", "rsn": "P", "srctyp": "e-Invoice",
+              "items": [{"num": 1, "rt": 18, "txval": 1000.00, "camt": 0, "samt": 0, "iamt": 180.00, "csamt": 0}]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

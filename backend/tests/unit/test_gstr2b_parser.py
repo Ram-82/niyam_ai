@@ -97,6 +97,33 @@ def test_missing_inum_is_rejected_not_raised() -> None:
     assert result.rejects[0].reason == "missing_required"
 
 
+def test_ims_fields_passthrough_when_present() -> None:
+    """IMS-era fields (``imsactn`` + ``imsts``) must reach the canonical
+    entry unmodified when the payload carries them. Migration 0006 stores
+    them on b2b_entry.ims_action / ims_status. No engine consumes them
+    yet (see README 'IMS-era 2B semantics' TODO)."""
+    payload = _sample_2b()
+    inv0 = payload["data"]["docdata"]["b2b"][0]["inv"][0]
+    inv0["imsactn"] = "A"
+    inv0["imsts"] = "accepted"
+    inv1 = payload["data"]["docdata"]["b2b"][0]["inv"][1]
+    inv1["imsactn"] = "P"
+    inv1["imsts"] = "pending"
+    result = parse_gstr2b_json(payload, gstn_pull_id=PULL_ID)
+    assert result.entries[0].ims_action == "A"
+    assert result.entries[0].ims_status == "accepted"
+    assert result.entries[1].ims_action == "P"
+    assert result.entries[1].ims_status == "pending"
+
+
+def test_ims_fields_null_when_absent() -> None:
+    """Pre-IMS payloads (no imsactn/imsts) must yield None — never a
+    bare empty string or 'None' literal that would land in the DB."""
+    result = parse_gstr2b_json(_sample_2b(), gstn_pull_id=PULL_ID)
+    assert result.entries[0].ims_action is None
+    assert result.entries[0].ims_status is None
+
+
 def test_alternate_top_level_shape() -> None:
     """Some 2B exports place ``b2b`` directly under ``data`` (no ``docdata``)."""
     payload = {

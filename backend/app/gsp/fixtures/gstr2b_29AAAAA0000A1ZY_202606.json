@@ -1,0 +1,440 @@
+{
+  "_niyam_fixture_notes": [
+    "Auto-generated from demo seed for period 202606. Regenerate with backend/scripts/mkfixture."
+  ],
+  "data": {
+    "rtnprd": "062026",
+    "gendt": "14-07-2026",
+    "gstin": "29AAAAA0000A1ZY",
+    "chksum": "demo-seed-mirror-202606",
+    "docdata": {
+      "b2b": [
+        {
+          "ctin": "29BBBBB0000A1ZR",
+          "trdnm": "Supplier BBBBB",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV-M_1-1",
+              "idt": "10-06-2026",
+              "val": 25000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 21186.0,
+                  "camt": 1907.0,
+                  "samt": 1907.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            },
+            {
+              "inum": "INV-M_1-2",
+              "idt": "20-06-2026",
+              "val": 25000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 21186.0,
+                  "camt": 1907.0,
+                  "samt": 1907.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "29BBBBB0001A1ZQ",
+          "trdnm": "Supplier BBBBB",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV-M_2-1",
+              "idt": "10-06-2026",
+              "val": 25000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 21186.0,
+                  "camt": 1907.0,
+                  "samt": 1907.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            },
+            {
+              "inum": "INV-M_2-2",
+              "idt": "20-06-2026",
+              "val": 25000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 21186.0,
+                  "camt": 1907.0,
+                  "samt": 1907.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "29CCCCC0000A1ZK",
+          "trdnm": "Supplier CCCCC",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV-M_3-1",
+              "idt": "10-06-2026",
+              "val": 25000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 21186.0,
+                  "camt": 1907.0,
+                  "samt": 1907.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            },
+            {
+              "inum": "INV-M_3-2",
+              "idt": "20-06-2026",
+              "val": 25000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 21186.0,
+                  "camt": 1907.0,
+                  "samt": 1907.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "29CCCCC0001A1ZJ",
+          "trdnm": "Supplier CCCCC",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV-M_4-1",
+              "idt": "10-06-2026",
+              "val": 25000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 21186.0,
+                  "camt": 1907.0,
+                  "samt": 1907.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            },
+            {
+              "inum": "INV-M_4-2",
+              "idt": "20-06-2026",
+              "val": 25000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 21186.0,
+                  "camt": 1907.0,
+                  "samt": 1907.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "29DDDDD0000A1ZD",
+          "trdnm": "Supplier DDDDD",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV-M_5-1",
+              "idt": "10-06-2026",
+              "val": 25000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 21186.0,
+                  "camt": 1907.0,
+                  "samt": 1907.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            },
+            {
+              "inum": "INV-M_5-2",
+              "idt": "20-06-2026",
+              "val": 25000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 21186.0,
+                  "camt": 1907.0,
+                  "samt": 1907.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "29EEEEE0000A1Z6",
+          "trdnm": "Supplier EEEEE",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV/P_1-1",
+              "idt": "17-06-2026",
+              "val": 75048.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 63600.0,
+                  "camt": 5724.0,
+                  "samt": 5724.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "27FFFFF0000A1Z3",
+          "trdnm": "Supplier FFFFF",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV-P_2/1",
+              "idt": "17-06-2026",
+              "val": 75050.0,
+              "pos": "27",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 63600.0,
+                  "camt": 0.0,
+                  "samt": 0.0,
+                  "iamt": 11450.0,
+                  "csamt": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "29HHHHH0000A1ZL",
+          "trdnm": "Supplier HHHHH",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV-SD_2-1",
+              "idt": "10-06-2026",
+              "val": 5.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 5.0,
+                  "camt": 0.0,
+                  "samt": 0.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "06KKKKK0000A1Z6",
+          "trdnm": "Supplier KKKKK",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV-SD_4-1",
+              "idt": "20-06-2026",
+              "val": 3.0,
+              "pos": "06",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 3.0,
+                  "camt": 0.0,
+                  "samt": 0.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "ctin": "29MMMMM0000A1ZK",
+          "trdnm": "Supplier MMMMM",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV-GHOST-BIG",
+              "idt": "15-06-2026",
+              "val": 120000.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 120000.0,
+                  "camt": 0.0,
+                  "samt": 0.0,
+                  "iamt": 0.0,
+                  "csamt": 0.0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

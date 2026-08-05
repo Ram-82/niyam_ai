@@ -35,6 +35,9 @@ TRUNCATE_ORDER = (
     "consent_log",
     "audit_log",
     "import_job",
+    "gsp_pull_attempt",
+    "gsp_call_log",
+    "gsp_session",
     "client_assignment",
     "gstin_profile",
     "user_invite",
@@ -47,6 +50,17 @@ TRUNCATE_ORDER = (
     # UPDATE active=FALSE on the seed and INSERT their own row, undoing in
     # teardown; the partial unique index enforces mutual exclusion.
 )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _enable_test_helpers() -> None:
+    """Set ``NIYAM_ALLOW_TEST_HELPERS=1`` for the pytest session so
+    ``tests/support/lockout_admin.py`` and friends refuse to run outside
+    tests. See P2.1 Stage C. This is intentionally session-scoped and
+    autouse; individual tests cannot opt out."""
+    import os
+
+    os.environ["NIYAM_ALLOW_TEST_HELPERS"] = "1"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -123,11 +137,14 @@ def _flush_redis() -> Iterator[None]:
     try:
         from app.auth.revocation import _redis as _rev_redis
         from app.auth.lockout import _redis as _lock_redis
+        from app.gsp.lockout import _redis as _gsp_redis
 
         _rev_redis.flushdb()
-        # In practice both point at the same DB, but flush both for safety.
+        # In practice all three point at the same DB, but flush all for safety.
         if _lock_redis is not _rev_redis:
             _lock_redis.flushdb()
+        if _gsp_redis is not _rev_redis and _gsp_redis is not _lock_redis:
+            _gsp_redis.flushdb()
     except Exception:
         # If Redis is not reachable in a given test environment we let the
         # test itself fail with a clearer error later.

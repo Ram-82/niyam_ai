@@ -1,0 +1,97 @@
+{
+  "_niyam_fixture_notes": [
+    "Representative GSTR-2B payload for period 062026 (June 2026), one supplier, three invoices.",
+    "Shape: {data: {docdata: {b2b: [...]}}} — one of the two nested shapes parse_gstr2b_json accepts.",
+    "IMS-era fields carried through (imsactn/imsts at inv level; gendt at header) — see README 'IMS-era 2B semantics' TODO.",
+    "Values chosen so parser math is verifiable: taxable 1000/2000/1500 rupees → 100_000/200_000/150_000 paise."
+  ],
+  "data": {
+    "rtnprd": "062026",
+    "gendt": "14-07-2026",
+    "gstin": "29ZZZZZ9999Z9Z9",
+    "chksum": "niyam-mock-fixture-v1",
+    "docdata": {
+      "b2b": [
+        {
+          "ctin": "29AAAAA0000A1Z5",
+          "trdnm": "Karnataka Traders Pvt Ltd",
+          "supfildt": "11-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "INV-2026-100",
+              "idt": "05-06-2026",
+              "val": 1180,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "diffprcnt": 1,
+              "irngendate": "05-06-2026",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 1000,
+                  "camt": 90,
+                  "samt": 90,
+                  "iamt": 0,
+                  "csamt": 0
+                }
+              ]
+            },
+            {
+              "inum": "INV-2026-101",
+              "idt": "12-06-2026",
+              "val": 2360,
+              "pos": "27",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "NA",
+              "imsts": "no_action_taken",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 2000,
+                  "camt": 0,
+                  "samt": 0,
+                  "iamt": 360,
+                  "csamt": 0
+                }
+              ]
+            },
+            {
+              "inum": "INV-2026-102",
+              "idt": "22-06-2026",
+              "val": 1770,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "N",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "P",
+              "imsts": "pending",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 1500,
+                  "camt": 135,
+                  "samt": 135,
+                  "iamt": 0,
+                  "csamt": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

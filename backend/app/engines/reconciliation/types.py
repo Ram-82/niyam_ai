@@ -55,6 +55,11 @@ class MatchPair:
     invoice_total_paise: int
     b2b_total_paise: int
     supplier_gstin: str
+    # Threaded from B2BLine so the summary can split matched ITC into
+    # claimable vs not-available (respects the 2B ``itcavl`` flag). A
+    # matched row with itc_available=False is NOT claimable ITC; it is
+    # reconciled but the CA cannot claim credit against it.
+    itc_available: bool = True
 
 
 @dataclass(frozen=True)
@@ -121,15 +126,40 @@ class ReconResult:
         )[:10]
 
         with_near_misses = sum(1 for r in sup_def if r.near_misses)
+        matched_claimable = sum(
+            p.invoice_total_paise for p in matched if p.itc_available
+        )
+        matched_not_available = sum(
+            p.invoice_total_paise for p in matched if not p.itc_available
+        )
+        probable_claimable = sum(
+            p.invoice_total_paise for p in probable if p.itc_available
+        )
+        probable_not_available = sum(
+            p.invoice_total_paise for p in probable if not p.itc_available
+        )
         return {
             "matched": {
                 "count": len(matched),
                 "paise": sum(p.invoice_total_paise for p in matched),
+                # Stage-3 split: respects the 2B itcavl flag. IMS-era 2B
+                # can carry ITC-blocked invoices (e.g. blocked-credit rule)
+                # that reconcile to a register row but cannot be claimed.
+                # UI must show ``paise_claimable`` in the ITC total and
+                # surface ``paise_not_available`` as a distinct callout.
+                "paise_claimable": matched_claimable,
+                "paise_not_available": matched_not_available,
+                # TODO-VERIFY-WITH-CA: README item 15 (adversarial fixture A10).
+                # If the CA rules that a CGST+SGST-vs-IGST split at equal totals
+                # must demote to `probable` or carry a warning, this is the
+                # summary shape to extend (add `tax_split_warnings: int` etc.).
                 "description": "exact match with a 2B entry",
             },
             "probable": {
                 "count": len(probable),
                 "paise": sum(p.invoice_total_paise for p in probable),
+                "paise_claimable": probable_claimable,
+                "paise_not_available": probable_not_available,
                 "description": (
                     "fuzzy match above threshold — CA confirm/reject needed"
                 ),

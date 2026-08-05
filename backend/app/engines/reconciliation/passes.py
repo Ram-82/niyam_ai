@@ -129,6 +129,7 @@ def _pass_exact(
                     invoice_total_paise=r.total_paise,
                     b2b_total_paise=c.total_paise,
                     supplier_gstin=r.supplier_gstin,
+                    itc_available=c.itc_available,
                 )
             )
             paired_reg.add(r.invoice_id)
@@ -178,6 +179,7 @@ def _pass_fuzzy(
                 invoice_total_paise=r.total_paise,
                 b2b_total_paise=b.total_paise,
                 supplier_gstin=r.supplier_gstin,
+                itc_available=b.itc_available,
             )
         )
         paired_reg.add(r.invoice_id)

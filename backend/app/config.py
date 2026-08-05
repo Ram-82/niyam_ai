@@ -51,5 +51,21 @@ class Settings(BaseSettings):
     # Tests flip it False so ``queue.enqueue`` runs the job in-process.
     queue_async: bool = True
 
+    # GSP integration mode. 'mock' → talk to the local MockGSPServer
+    # (docker-compose ``gsp-mock`` service on port 9000). 'live' → talk
+    # to a real vendor via a real adapter (none shipped yet — Stage 4
+    # README documents the swap-in). The frontend surfaces a
+    # "sandbox mode" tag whenever ``gsp_mode == 'mock'`` and must never
+    # remove it in mock mode.
+    gsp_mode: str = "mock"
+    gsp_base_url: str = "http://gsp-mock:9000"
+
+    # Machine credential for the scheduler cron trigger. NEVER accept a user
+    # JWT here — the sweep runs across firms and should be unavailable to
+    # any human account. Cron sets ``X-Scheduler-Token: <this>``. Empty
+    # value = scheduler endpoint disabled (dev default before an ops token
+    # is provisioned).
+    gsp_scheduler_token: str = ""
+
 
 settings = Settings()

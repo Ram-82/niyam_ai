@@ -1,0 +1,46 @@
+{
+  "_niyam_fixture_notes": [
+    "Minimal fixture for backfill demonstration."
+  ],
+  "data": {
+    "rtnprd": "052026",
+    "gendt": "14-06-2026",
+    "gstin": "29AAAAA0000A1ZY",
+    "chksum": "demo-may-min",
+    "docdata": {
+      "b2b": [
+        {
+          "ctin": "29BBBBB0000A1ZR",
+          "trdnm": "Supplier BBBBB",
+          "supfildt": "10-06-2026",
+          "supprd": "052026",
+          "inv": [
+            {
+              "inum": "INV-M_1-MAY",
+              "idt": "08-05-2026",
+              "val": 11800.0,
+              "pos": "29",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 10000.0,
+                  "camt": 900.0,
+                  "samt": 900.0,
+                  "iamt": 0,
+                  "csamt": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

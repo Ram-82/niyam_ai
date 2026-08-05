@@ -33,6 +33,7 @@ from app.ingestion.csv_parser import parse_invoice_csv_bytes
 from app.ingestion.errors import RejectedRow
 from app.ingestion.excel_parser import parse_invoice_xlsx
 from app.ingestion.gstr2b_parser import parse_gstr2b_bytes
+from app.ingestion.writer import bulk_insert_b2b_entries as _shared_b2b_insert
 
 
 log = logging.getLogger("niyam.workers.jobs")
@@ -213,31 +214,19 @@ def _process_gstr2b(
     data = _read_upload(str(job["id"]))
 
     # Persist the raw pull first so b2b entries have a gstn_pull_id FK.
-    with firm_scoped_session(job["firm_id"]) as session:
-        result = session.execute(
-            text(
-                """
-                INSERT INTO gstn_pull (
-                    firm_id, gstin_profile_id, return_type, period,
-                    raw_payload, source
-                ) VALUES (
-                    :firm_id, :gid, 'GSTR2B', :period,
-                    CAST(:raw AS JSONB), 'json_import'
-                )
-                RETURNING id
-                """
-            ),
-            {
-                "firm_id": str(job["firm_id"]),
-                "gid": str(job["gstin_profile_id"]),
-                "period": job["period"] or "000000",
-                "raw": data.decode("utf-8", errors="replace"),
-            },
-        )
-        pull_id = result.scalar_one()
+    # Uses the same writer as the GSP-pull path — source distinguishes.
+    from app.ingestion.writer import insert_gstn_pull
+
+    pull_id = insert_gstn_pull(
+        firm_id=job["firm_id"],
+        gstin_profile_id=job["gstin_profile_id"],
+        period=job["period"] or "000000",
+        raw_payload=json.loads(data.decode("utf-8")),
+        source="json_import",
+    )
 
     parse = parse_gstr2b_bytes(data, gstn_pull_id=str(pull_id))
-    accepted = _bulk_insert_b2b_entries(
+    accepted = _shared_b2b_insert(
         firm_id=job["firm_id"],
         gstn_pull_id=pull_id,
         entries=parse.entries,
@@ -325,42 +314,5 @@ def _bulk_insert_invoices(
     return accepted, duplicate
 
 
-def _bulk_insert_b2b_entries(
-    firm_id: uuid.UUID,
-    gstn_pull_id: uuid.UUID,
-    entries: list[CanonicalB2BEntry],
-) -> int:
-    if not entries:
-        return 0
-    accepted = 0
-    with firm_scoped_session(firm_id) as session:
-        for e in entries:
-            session.execute(
-                text(
-                    """
-                    INSERT INTO b2b_entry (
-                        firm_id, gstn_pull_id, supplier_gstin,
-                        invoice_number, invoice_date, taxable_value_paise,
-                        tax_paise_breakdown, itc_available, note_type
-                    ) VALUES (
-                        :firm_id, :pid, :ctin,
-                        :inum, :idt, :tx,
-                        CAST(:tb AS JSONB), :itc,
-                        CAST(:note AS b2b_note_type)
-                    )
-                    """
-                ),
-                {
-                    "firm_id": str(firm_id),
-                    "pid": str(gstn_pull_id),
-                    "ctin": e.supplier_gstin,
-                    "inum": e.invoice_number,
-                    "idt": e.invoice_date,
-                    "tx": e.taxable_value_paise,
-                    "tb": json.dumps(e.tax_paise_breakdown),
-                    "itc": e.itc_available,
-                    "note": e.note_type,  # None -> NULL cast lands cleanly
-                },
-            )
-            accepted += 1
-    return accepted
+# The b2b writer lives in app.ingestion.writer so the GSP-pull path
+# and this JSON-upload path share one INSERT. See _process_gstr2b above.

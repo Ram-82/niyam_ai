@@ -1,0 +1,47 @@
+{
+  "_niyam_fixture_notes": [
+    "Second-taxpayer 2B for June 2026 — Maharashtra client, single supplier, one invoice.",
+    "Purpose: adapter/mock tests can vary the receiving GSTIN without collisions."
+  ],
+  "data": {
+    "rtnprd": "062026",
+    "gendt": "14-07-2026",
+    "gstin": "27BBBBB1111B2Z6",
+    "chksum": "niyam-mock-fixture-v1-mh",
+    "docdata": {
+      "b2b": [
+        {
+          "ctin": "27CCCCC2222C3Z7",
+          "trdnm": "Maharashtra Suppliers LLP",
+          "supfildt": "10-07-2026",
+          "supprd": "062026",
+          "inv": [
+            {
+              "inum": "MH-2026-001",
+              "idt": "18-06-2026",
+              "val": 5900,
+              "pos": "27",
+              "rev": "N",
+              "itcavl": "Y",
+              "rsn": "P",
+              "srctyp": "e-Invoice",
+              "imsactn": "A",
+              "imsts": "accepted",
+              "items": [
+                {
+                  "num": 1,
+                  "rt": 18,
+                  "txval": 5000,
+                  "camt": 450,
+                  "samt": 450,
+                  "iamt": 0,
+                  "csamt": 0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

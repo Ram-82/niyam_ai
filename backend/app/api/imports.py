@@ -255,6 +255,60 @@ def list_imports(
 
 
 # ---------------------------------------------------------------------------
+# GET /imports/unified — UNIONs import_job (uploads) + gsp_pull_attempt
+# (live pulls) in one list, labeled by source. Powers the imports page's
+# "everything in one place, labeled" view (P2 stage 4 requirement).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/unified/list")
+def list_imports_unified(
+    _: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> list[dict]:
+    from sqlalchemy import text as _text
+
+    rows = session.execute(
+        _text(
+            """
+            SELECT
+                'upload'::text AS source_kind,
+                id::text,
+                kind::text AS label,
+                status::text AS status,
+                filename,
+                period,
+                uploaded_at AS at,
+                accepted_rows,
+                rejected_rows,
+                duplicate_rows,
+                error_message,
+                NULL::text AS error_kind
+            FROM import_job
+            UNION ALL
+            SELECT
+                'gsp_api'::text AS source_kind,
+                id::text,
+                'gstr2b_gsp_pull'::text AS label,
+                status::text AS status,
+                NULL::text AS filename,
+                period,
+                started_at AS at,
+                0 AS accepted_rows,
+                0 AS rejected_rows,
+                0 AS duplicate_rows,
+                error_message,
+                error_kind
+            FROM gsp_pull_attempt
+            ORDER BY at DESC
+            LIMIT 200
+            """
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
 # GET /imports/{id}/errors.csv — materialize rejects for download
 # ---------------------------------------------------------------------------
 

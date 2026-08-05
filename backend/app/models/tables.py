@@ -24,6 +24,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     PrimaryKeyConstraint,
     Text,
@@ -290,6 +291,10 @@ class B2BEntry(Base):
     note_type: Mapped[Optional[str]] = mapped_column(
         B2BNoteTypeEnum, nullable=True
     )
+    # IMS passthrough (migration 0006). Stored, not read — no engine uses
+    # these yet. See README "IMS-era 2B semantics" TODO.
+    ims_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ims_action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -551,4 +556,78 @@ class ImportJob(Base):
     )
     finished_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class GspSession(Base):
+    """Encrypted vendor session per GSTIN profile.
+
+    ``token_ciphertext`` is application-layer AEAD (see ``app/gsp/crypto``).
+    Plaintext token NEVER lives in the DB, in logs, or in
+    ``vendor_context`` — a CHECK constraint on the column asserts it stays
+    a JSON object (opaque, non-secret).
+    """
+
+    __tablename__ = "gsp_session"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    firm_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ca_firm.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    gstin_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("gstin_profile.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    token_ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    key_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="1"
+    )
+    vendor_context: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    issued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    connected_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    connected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class GspCallLog(Base):
+    """APPEND ONLY per-call meter (GSP charges per call)."""
+
+    __tablename__ = "gsp_call_log"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    firm_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ca_firm.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    gstin_profile_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("gstin_profile.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    period: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    succeeded: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_kind: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
