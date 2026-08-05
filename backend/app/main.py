@@ -20,6 +20,7 @@ from app.api.command_center import router as command_center_router
 from app.api.gsp import router as gsp_router
 from app.api.imports import router as imports_router
 from app.api.invites import router as invites_router
+from app.api.narrator import router as narrator_router
 from app.api.workspace import router as workspace_router
 from app.auth.revocation import _redis
 from app.db import app_engine
@@ -68,6 +69,7 @@ app.include_router(clients_router)
 app.include_router(workspace_router)
 app.include_router(admin_router)
 app.include_router(gsp_router)
+app.include_router(narrator_router)
 
 
 @app.get("/health")

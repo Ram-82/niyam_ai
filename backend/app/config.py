@@ -67,5 +67,17 @@ class Settings(BaseSettings):
     # is provisioned).
     gsp_scheduler_token: str = ""
 
+    # LLM narrator feature flag + adapter selection. Default OFF so the
+    # /narrator/preview endpoint returns 503 until an operator explicitly
+    # enables it — narration reaches the CA, not the client, but even
+    # that surface should stay hidden until the CA has reviewed the
+    # prose quality on their firm's own data.
+    narrator_enabled: bool = False
+    # 'mock' → deterministic template renderer, no external calls.
+    # 'anthropic' → Claude via the Anthropic SDK; requires anthropic_api_key.
+    narrator_mode: str = "mock"
+    narrator_model: str = "claude-opus-4-7"
+    anthropic_api_key: str = ""
+
 
 settings = Settings()

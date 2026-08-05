@@ -631,3 +631,39 @@ class GspCallLog(Base):
     at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class NarrationRun(Base):
+    """APPEND ONLY record of every LLM narration generated (migration 0009).
+
+    The prose here is the machine's original. A CA edit lands on a
+    separate ``narration_edit`` row (P3) and never mutates this one.
+    """
+
+    __tablename__ = "narration_run"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    firm_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ca_firm.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    gstin_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("gstin_profile.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    return_type: Mapped[str] = mapped_column(ReturnTypeEnum, nullable=False)
+    period: Mapped[str] = mapped_column(Text, nullable=False)
+    language: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    facts: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    output: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    generated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

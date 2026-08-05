@@ -31,6 +31,7 @@ TRUNCATE_ORDER = (
     "gstn_pull",
     "validation_flag",
     "invoice",
+    "narration_run",
     "readiness_snapshot",
     "consent_log",
     "audit_log",
