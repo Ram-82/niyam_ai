@@ -312,7 +312,27 @@ def _seed_supplier_chase_request(
     firm_id = b["firm_id"]
     client_id, gstin_id, _ = _seed_gstin_and_narration(b)
     with owner_engine.begin() as conn:
-        # Need a reconciliation_run + match_result to point at.
+        # match_result has NO gstin_profile_id — it derives via invoice
+        # (register side) or b2b_entry (2B side). supplier_default rows
+        # come from the register side, so we need an invoice_id.
+        invoice_id = conn.execute(
+            text(
+                """
+                INSERT INTO invoice (
+                    firm_id, gstin_profile_id, source, direction,
+                    invoice_number, invoice_date, counterparty_gstin,
+                    taxable_value_paise, total_paise, content_hash
+                ) VALUES (
+                    :f, :g, 'csv_import', 'purchase',
+                    'CH-SEED-1', DATE '2026-07-15', '29BBBBB1234C2ZZ',
+                    100000, 118000, :h
+                )
+                RETURNING id
+                """
+            ),
+            {"f": firm_id, "g": gstin_id, "h": f"h-chase-seed-{uuid.uuid4()}"},
+        ).scalar_one()
+        # reconciliation_run needs a gstn_pull to attach to.
         pull_id = conn.execute(
             text(
                 """
@@ -333,9 +353,10 @@ def _seed_supplier_chase_request(
                 """
                 INSERT INTO reconciliation_run (
                     firm_id, gstin_profile_id, period, rule_pack_version,
-                    gstn_pull_id, summary
+                    gstn_pull_id, summary, status
                 ) VALUES (
-                    :fid, :gid, '202607', '1.0.0', :pid, CAST('{}' AS JSONB)
+                    :fid, :gid, '202607', '1.0.0', :pid,
+                    CAST('{}' AS JSONB), 'succeeded'
                 )
                 RETURNING id
                 """
@@ -351,18 +372,19 @@ def _seed_supplier_chase_request(
             text(
                 """
                 INSERT INTO match_result (
-                    firm_id, gstin_profile_id, reconciliation_run_id,
-                    bucket, context
+                    firm_id, run_id, invoice_id, bucket, confidence,
+                    rule_pack_version, context
                 ) VALUES (
-                    :fid, :gid, :rid, 'supplier_default', CAST(:ctx AS JSONB)
+                    :fid, :rid, :iid, 'supplier_default', 0.0,
+                    '1.0.0', CAST(:ctx AS JSONB)
                 )
                 RETURNING id
                 """
             ),
             {
                 "fid": firm_id,
-                "gid": gstin_id,
                 "rid": run_id,
+                "iid": invoice_id,
                 "ctx": json.dumps(context_json),
             },
         ).scalar_one()

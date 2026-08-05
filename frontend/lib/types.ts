@@ -86,6 +86,23 @@ export interface MatchResult {
       total_paise: number;
       similarity: number;
     }>;
+    /** Set by POST /match-results/{id}/mark-near-miss-reviewed. Presence
+     * unlocks the WhatsApp supplier_chase gate — do not treat as a mere
+     * UI hint; the backend enforces the same check. */
+    near_miss_reviewed_at?: string;
+    /** Present when the CA has taken supplier chase action for this row.
+     * Populated by the workspace client after a successful send so the
+     * UI can badge the row without re-fetching. */
+    last_chase_delivery_request_id?: string;
+    /** Optional: supplier GSTIN copied off the register invoice for
+     * the chase modal's "context" line. Populated by the backend when
+     * available; can be inferred from the invoice on the frontend. */
+    supplier_gstin?: string;
+    /** Optional: register invoice number/date, used to populate the
+     * chase message template. */
+    register_invoice_number?: string;
+    register_invoice_date?: string;
+    register_total_paise?: number;
   };
 }
 

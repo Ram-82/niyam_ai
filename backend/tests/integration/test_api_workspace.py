@@ -402,3 +402,156 @@ def test_confirm_non_probable_rejected(test_client, firm_and_gid) -> None:
         headers={"Authorization": f"Bearer {access}"},
     )
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# mark-near-miss-reviewed — gates the whatsapp supplier_chase flow
+# ---------------------------------------------------------------------------
+
+
+def _seed_supplier_default_match(firm_id, gid) -> uuid.UUID:
+    """Manufacture a supplier_default match_result row so the endpoint
+    has a target — sidesteps having to run the full reconciliation to
+    reach an unmatched residual."""
+    pull_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    match_id = uuid.uuid4()
+    invoice_id = _insert_invoice(
+        firm_id, gid, number="SD-1", date_=date(2026, 6, 15),
+        cp=SUP_A, total=100_000, cgst=0, sgst=0,
+    )
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO gstn_pull (id, firm_id, gstin_profile_id, "
+                "return_type, period, raw_payload, source) "
+                "VALUES (:id, :f, :g, 'GSTR2B', '202606', CAST('{}' AS JSONB), "
+                "'json_import')"
+            ),
+            {"id": pull_id, "f": firm_id, "g": gid},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO reconciliation_run (id, firm_id, gstin_profile_id, "
+                "period, rule_pack_version, gstn_pull_id, summary, status) "
+                "VALUES (:id, :f, :g, '202606', '1.0.0', :pid, "
+                "CAST('{}' AS JSONB), 'succeeded')"
+            ),
+            {"id": run_id, "f": firm_id, "g": gid, "pid": pull_id},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO match_result (id, firm_id, run_id, invoice_id, "
+                "bucket, confidence, rule_pack_version, context) "
+                "VALUES (:id, :f, :rid, :iid, 'supplier_default', 0.0, "
+                "'1.0.0', CAST(:ctx AS JSONB))"
+            ),
+            {
+                "id": match_id, "f": firm_id, "rid": run_id,
+                "iid": invoice_id,
+                "ctx": json.dumps({"near_misses": []}),
+            },
+        )
+    return match_id
+
+
+def test_mark_near_miss_reviewed_sets_timestamp_preserves_other_keys(
+    test_client, firm_and_gid
+) -> None:
+    admin, firm_id, gid = firm_and_gid
+    match_id = _seed_supplier_default_match(firm_id, gid)
+    access = _login(test_client, admin)
+
+    r = test_client.post(
+        f"/match-results/{match_id}/mark-near-miss-reviewed",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["id"] == str(match_id)
+    assert body["near_miss_reviewed_at"]
+
+    # DB: near_miss_reviewed_at present, near_misses[] preserved.
+    with owner_engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT context FROM match_result WHERE id = :id"),
+            {"id": str(match_id)},
+        ).mappings().first()
+    assert row["context"]["near_miss_reviewed_at"]
+    assert row["context"]["near_misses"] == []
+
+    # Audit trail records the review.
+    assert _audit_rows(firm_id, "match.near_miss_reviewed")
+
+
+def test_mark_near_miss_reviewed_rejects_non_supplier_default(
+    test_client, firm_and_gid
+) -> None:
+    """A probable or matched row must NOT accept a review — the concept
+    is meaningless outside supplier_default (there's no near-miss list
+    to review on a row that already matched to a 2B entry)."""
+    admin, firm_id, gid = firm_and_gid
+    _insert_invoice(
+        firm_id, gid, number="M-1", date_=date(2026, 6, 15),
+        cp=SUP_A, total=100_000, cgst=0, sgst=0,
+    )
+    _seed_2b(
+        firm_id, gid, period="202606",
+        entries=[{"supplier": SUP_A, "number": "M-1",
+                  "date": date(2026, 6, 15), "taxable": 100_000}],
+    )
+    access = _login(test_client, admin)
+    r = test_client.post(
+        "/engines/reconcile",
+        headers={"Authorization": f"Bearer {access}"},
+        json={"gstin_profile_id": str(gid), "period": "202606"},
+    )
+    run_id = r.json()["run_id"]
+    matches = test_client.get(
+        f"/reconciliation-runs/{run_id}/matches?bucket=matched",
+        headers={"Authorization": f"Bearer {access}"},
+    ).json()
+    assert len(matches) == 1
+    r = test_client.post(
+        f"/match-results/{matches[0]['id']}/mark-near-miss-reviewed",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert r.status_code == 400
+    assert "supplier_default" in r.json()["detail"]
+
+
+def test_mark_near_miss_reviewed_is_idempotent_and_each_call_audits(
+    test_client, firm_and_gid
+) -> None:
+    admin, firm_id, gid = firm_and_gid
+    match_id = _seed_supplier_default_match(firm_id, gid)
+    access = _login(test_client, admin)
+
+    r1 = test_client.post(
+        f"/match-results/{match_id}/mark-near-miss-reviewed",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    first_ts = r1.json()["near_miss_reviewed_at"]
+
+    r2 = test_client.post(
+        f"/match-results/{match_id}/mark-near-miss-reviewed",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert r2.status_code == 200
+    second_ts = r2.json()["near_miss_reviewed_at"]
+    # Second call overwrites the timestamp; both audit.
+    assert first_ts != second_ts
+    audit = _audit_rows(firm_id, "match.near_miss_reviewed")
+    assert len(audit) == 2
+
+
+def test_mark_near_miss_reviewed_unknown_match_is_404(
+    test_client, firm_and_gid
+) -> None:
+    admin, _, _ = firm_and_gid
+    access = _login(test_client, admin)
+    r = test_client.post(
+        f"/match-results/{uuid.uuid4()}/mark-near-miss-reviewed",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert r.status_code == 404

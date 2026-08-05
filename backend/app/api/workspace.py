@@ -13,6 +13,11 @@ Mutations (either role, RLS-scoped, audited):
   POST /flags/{id}/resolve
   POST /match-results/{id}/confirm
   POST /match-results/{id}/reject
+  POST /match-results/{id}/mark-near-miss-reviewed
+      Sets context.near_miss_reviewed_at = now() on a supplier_default
+      row. The whatsapp gate checks this before allowing a supplier
+      chase — step-9 acceptance criterion #2: never chase before the
+      CA has reviewed the near-miss list for a plausible match.
   POST /engines/validate  {gstin_profile_id, period}
   POST /engines/reconcile {gstin_profile_id, period}
   POST /engines/score     {gstin_profile_id, return_type, period}
@@ -383,6 +388,69 @@ def reject_match(
         metadata={"before": {"rejected": False}, "after": {"rejected": True}},
     )
     return {"id": str(match_id), "rejected": True}
+
+
+@router.post(
+    "/match-results/{match_id}/mark-near-miss-reviewed",
+    status_code=status.HTTP_200_OK,
+)
+def mark_near_miss_reviewed(
+    match_id: uuid.UUID,
+    user: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> dict[str, Any]:
+    """Record that the CA reviewed the near-miss list on a supplier_default row.
+
+    Writes ``context.near_miss_reviewed_at = now()`` while preserving all
+    other keys on the context JSONB. Idempotent: calling twice overwrites
+    the timestamp — no error, but every call still audits so the trail
+    shows every ack.
+
+    This endpoint is the sole way the WhatsApp supplier_chase gate
+    (``app.whatsapp.gate``) becomes satisfiable — the gate looks up the
+    same key on match_result.context. Do not add another writer to it.
+    """
+    row = session.execute(
+        text(
+            "SELECT bucket::text AS bucket, context "
+            "FROM match_result WHERE id = :id"
+        ),
+        {"id": str(match_id)},
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="match not found")
+    if row["bucket"] != "supplier_default":
+        raise HTTPException(
+            status_code=400,
+            detail="near-miss review only applies to supplier_default matches",
+        )
+    reviewed_at = datetime.now(tz=timezone.utc)
+    # jsonb_set(context, '{near_miss_reviewed_at}', to_jsonb(...)) preserves
+    # other keys (near_misses[], etc.) — do NOT overwrite the whole column.
+    session.execute(
+        text(
+            "UPDATE match_result "
+            "SET context = jsonb_set("
+            "    context, '{near_miss_reviewed_at}', "
+            "    to_jsonb(:t::text), true"
+            ") "
+            "WHERE id = :id"
+        ),
+        {"id": str(match_id), "t": reviewed_at.isoformat()},
+    )
+    audit.record(
+        session,
+        firm_id=user.firm_id,
+        actor_user_id=user.id,
+        action="match.near_miss_reviewed",
+        entity_type="match_result",
+        entity_id=match_id,
+        metadata={"reviewed_at": reviewed_at.isoformat()},
+    )
+    return {
+        "id": str(match_id),
+        "near_miss_reviewed_at": reviewed_at.isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------

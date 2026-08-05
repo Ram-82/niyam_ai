@@ -54,6 +54,13 @@ class CreateReportRequestReq(BaseModel):
     template_name: Optional[str] = None  # defaults to settings.whatsapp_template_report_name
 
 
+class CreateChaseRequestReq(BaseModel):
+    match_result_id: uuid.UUID
+    whatsapp_number: str = Field(min_length=8, max_length=20)
+    language: str = Field(default="en", pattern=r"^(en|hi|kn|mr)$")
+    template_name: Optional[str] = None  # defaults to settings.whatsapp_template_chase_name
+
+
 class DeliveryRequestCreatedResp(BaseModel):
     delivery_request_id: uuid.UUID
 
@@ -127,6 +134,35 @@ def create_delivery_request(
         )
     except DeliveryRequestUnknown:
         raise HTTPException(status_code=404, detail="narration_run_not_found")
+    return DeliveryRequestCreatedResp(delivery_request_id=req_id)
+
+
+@router.post("/delivery-requests/chase", response_model=DeliveryRequestCreatedResp)
+def create_chase_request(
+    payload: CreateChaseRequestReq,
+    user: AppUser = Depends(get_current_user),
+) -> DeliveryRequestCreatedResp:
+    """Supplier-chase delivery_request. Points at a match_result rather
+    than a narration_run. The near-miss review gate is enforced at
+    /send time (not here) — creating a chase request against an
+    unreviewed near-miss is allowed; the CA can prepare the draft and
+    review the near-misses in either order. The send will 409 with
+    ``near_miss_review_missing`` until both are done."""
+    if not is_valid_e164(payload.whatsapp_number):
+        raise HTTPException(status_code=400, detail="invalid_e164_number")
+    template_name = payload.template_name or settings.whatsapp_template_chase_name
+    template_lang = LANGUAGE_TO_TEMPLATE_LANG.get(payload.language, "en_US")
+    try:
+        req_id = service.create_chase_request(
+            firm_id=user.firm_id,
+            user_id=user.id,
+            match_result_id=payload.match_result_id,
+            whatsapp_number=payload.whatsapp_number,
+            template_name=template_name,
+            template_language=template_lang,
+        )
+    except DeliveryRequestUnknown as e:
+        raise HTTPException(status_code=404, detail=str(e))
     return DeliveryRequestCreatedResp(delivery_request_id=req_id)
 
 

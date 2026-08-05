@@ -148,6 +148,98 @@ def create_report_request(
         return req.scalar_one()
 
 
+def create_chase_request(
+    *,
+    firm_id: str | uuid.UUID,
+    user_id: str | uuid.UUID,
+    match_result_id: str | uuid.UUID,
+    whatsapp_number: str,
+    template_name: str,
+    template_language: str,
+) -> uuid.UUID:
+    """Create an unapproved delivery_request for a supplier chase.
+
+    The referenced match_result must exist AND belong to the caller's
+    firm (RLS blocks cross-firm; we still raise DeliveryRequestUnknown
+    early for a clean 404 rather than a silent RLS-empty-result). The
+    match_result's bucket is NOT enforced here — the whatsapp gate
+    checks near_miss_reviewed_at at send time, which implies bucket=
+    'supplier_default' (only that bucket exposes the mark-reviewed
+    endpoint) and is the authoritative gate.
+    """
+    with firm_scoped_session(firm_id) as db:
+        # match_result has no gstin_profile_id of its own — it is derived
+        # from whichever side of the pair is set. supplier_default rows
+        # ALWAYS have invoice_id set (they are register rows with no 2B
+        # match), so the invoice → gstin_profile → client chain resolves.
+        # Missing_entry rows come from the b2b_entry side; we cover both
+        # via COALESCE so a future policy that chases missing entries
+        # does not silently break here.
+        row = db.execute(
+            text(
+                """
+                SELECT
+                    COALESCE(i.gstin_profile_id, be_gp.id) AS gstin_profile_id,
+                    COALESCE(i_gp.client_id, be_gp.client_id) AS client_id,
+                    mr.bucket::text AS bucket
+                FROM match_result mr
+                LEFT JOIN invoice i ON i.id = mr.invoice_id
+                LEFT JOIN gstin_profile i_gp ON i_gp.id = i.gstin_profile_id
+                LEFT JOIN b2b_entry be ON be.id = mr.b2b_entry_id
+                LEFT JOIN gstn_pull be_p ON be_p.id = be.gstn_pull_id
+                LEFT JOIN gstin_profile be_gp ON be_gp.id = be_p.gstin_profile_id
+                WHERE mr.id = :id
+                """
+            ),
+            {"id": str(match_result_id)},
+        ).mappings().first()
+        if row is None:
+            raise DeliveryRequestUnknown(
+                f"match_result {match_result_id} not found"
+            )
+        if row["bucket"] != "supplier_default":
+            # A chase against a probable/matched row is a category error;
+            # not silently accept then fail at gate time.
+            raise DeliveryRequestUnknown(
+                f"match_result {match_result_id} bucket={row['bucket']} — "
+                f"only supplier_default rows are chase-eligible"
+            )
+        if row["gstin_profile_id"] is None or row["client_id"] is None:
+            # Shouldn't happen — a supplier_default row must have an
+            # invoice_id (register side). If we get here, something in
+            # the reconciliation engine wrote a malformed row.
+            raise DeliveryRequestUnknown(
+                f"match_result {match_result_id} has no resolvable "
+                f"gstin_profile/client — reconciliation invariant broken"
+            )
+        req = db.execute(
+            text(
+                """
+                INSERT INTO delivery_request (
+                    firm_id, client_id, gstin_profile_id, purpose,
+                    match_result_id, whatsapp_number_snapshot,
+                    template_name, template_language, created_by
+                ) VALUES (
+                    :fid, :cid, :gpid, 'supplier_chase',
+                    :mrid, :wn, :tn, :tl, :ub
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "fid": str(firm_id),
+                "cid": str(row["client_id"]),
+                "gpid": str(row["gstin_profile_id"]),
+                "mrid": str(match_result_id),
+                "wn": whatsapp_number,
+                "tn": template_name,
+                "tl": template_language,
+                "ub": str(user_id),
+            },
+        )
+        return req.scalar_one()
+
+
 def approve(
     *,
     firm_id: str | uuid.UUID,

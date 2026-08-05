@@ -7,7 +7,6 @@ import {
   ArithmeticPanel,
   BlockersList,
   ITCCell,
-  NearMissReview,
   ScoreCell,
 } from "@/components/atoms";
 import { DataTable, type Column } from "@/components/Table";
@@ -16,6 +15,7 @@ import { SkeletonTable } from "@/components/Skeleton";
 import { PageHeader } from "@/components/PageHeader";
 import { ConnectionsPanel } from "@/components/ConnectionsPanel";
 import { DeliveryPanel } from "@/components/DeliveryPanel";
+import { SupplierChasePanel } from "@/components/SupplierChasePanel";
 import { formatDateIN, formatPeriod, formatTimestampIN } from "@/lib/format-date";
 import { bucketTint } from "@/lib/design-tokens";
 import type {
@@ -326,6 +326,17 @@ function ReconciliationTab({ gid, period }: { gid: string; period: string }) {
             bucket={bucket}
             onConfirm={confirm}
             onReject={reject}
+            onMatchContextPatch={(matchId, patch) =>
+              setMatches((prev) =>
+                prev
+                  ? prev.map((m) =>
+                      m.id === matchId
+                        ? { ...m, context: { ...m.context, ...patch } }
+                        : m,
+                    )
+                  : prev,
+              )
+            }
           />
         )}
       </div>
@@ -339,11 +350,19 @@ function MatchesList({
   bucket,
   onConfirm,
   onReject,
+  onMatchContextPatch,
 }: {
   matches: MatchResult[];
   bucket: Bucket;
   onConfirm: (id: string) => void;
   onReject: (id: string) => void;
+  /** Patch a specific match's ``context`` in the parent's local list
+   * so a mark-reviewed / send-chase side effect surfaces without a
+   * full refetch. Optional. */
+  onMatchContextPatch?: (
+    matchId: string,
+    patch: Partial<MatchResult["context"]>,
+  ) => void;
 }) {
   if (matches.length === 0) {
     return (
@@ -391,7 +410,14 @@ function MatchesList({
 
           {bucket === "supplier_default" && (
             <div className="mt-3">
-              <NearMissReview nearMisses={m.context.near_misses || []} />
+              <SupplierChasePanel
+                match={m}
+                onLocalUpdate={
+                  onMatchContextPatch
+                    ? (patch) => onMatchContextPatch(m.id, patch)
+                    : undefined
+                }
+              />
             </div>
           )}
         </div>
