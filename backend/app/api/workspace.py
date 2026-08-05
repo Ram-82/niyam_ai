@@ -68,6 +68,45 @@ class InvoiceRow(BaseModel):
     flag_count: int
 
 
+class GstinClientInfo(BaseModel):
+    """Prefill data the workspace hands to DeliveryPanel so the CA does
+    not have to look up the client separately + then remember to fill
+    the phone into the chase modal."""
+    gstin_profile_id: uuid.UUID
+    gstin: str
+    client_id: uuid.UUID
+    trade_name: str
+    language: str
+    whatsapp_number: Optional[str] = None
+
+
+@router.get("/gstins/{gid}/client", response_model=GstinClientInfo)
+def get_gstin_client(
+    gid: uuid.UUID,
+    _: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> GstinClientInfo:
+    """Resolve gstin_profile → client so the workspace can prefill the
+    DeliveryPanel + display the trade_name in the header without a
+    second API call."""
+    row = session.execute(
+        text(
+            """
+            SELECT gp.id AS gstin_profile_id, gp.gstin,
+                   c.id AS client_id, c.trade_name,
+                   c.language, c.whatsapp_number
+            FROM gstin_profile gp
+            JOIN client c ON c.id = gp.client_id
+            WHERE gp.id = :gid
+            """
+        ),
+        {"gid": str(gid)},
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="gstin_profile not found")
+    return GstinClientInfo(**dict(row))
+
+
 @router.get("/gstins/{gid}/invoices", response_model=list[InvoiceRow])
 def list_invoices(
     gid: uuid.UUID,

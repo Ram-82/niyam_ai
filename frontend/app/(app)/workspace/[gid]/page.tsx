@@ -20,6 +20,7 @@ import { formatDateIN, formatPeriod, formatTimestampIN } from "@/lib/format-date
 import { bucketTint } from "@/lib/design-tokens";
 import type {
   Flag,
+  GstinClientInfo,
   MatchResult,
   ReadinessResponse,
   ReconResponse,
@@ -442,6 +443,7 @@ function ReturnsTab({
   returnType: "GSTR1" | "GSTR3B";
 }) {
   const [snap, setSnap] = useState<ReadinessResponse | null>(null);
+  const [clientInfo, setClientInfo] = useState<GstinClientInfo | null>(null);
   const [showMath, setShowMath] = useState(false);
 
   useEffect(() => {
@@ -449,6 +451,16 @@ function ReturnsTab({
       `/gstins/${gid}/readiness?return_type=${returnType}&period=${period}`
     ).then(setSnap);
   }, [gid, period, returnType]);
+
+  useEffect(() => {
+    // Client details for the DeliveryPanel prefill. Fetched once per
+    // (gid) rather than on every panel-open so a rapid tab switch does
+    // not thrash the endpoint.
+    api<GstinClientInfo>(`/gstins/${gid}/client`).then(setClientInfo).catch(() => {
+      // Non-fatal — the DeliveryPanel just runs without prefill.
+      setClientInfo(null);
+    });
+  }, [gid]);
 
   if (!snap) return <SkeletonTable rows={2} cols={2} />;
 
@@ -509,6 +521,11 @@ function ReturnsTab({
           gstinProfileId={gid}
           period={period}
           returnType={returnType}
+          clientId={clientInfo?.client_id}
+          clientWhatsappNumber={clientInfo?.whatsapp_number ?? undefined}
+          clientDefaultLanguage={
+            (clientInfo?.language as "en" | "hi" | "kn" | "mr" | undefined) ?? "en"
+          }
         />
       )}
     </div>

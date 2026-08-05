@@ -23,13 +23,14 @@
  */
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { NearMissReview } from "@/components/atoms";
 import { DeliveryAttemptsList } from "@/components/DeliveryAttemptsList";
 import { NARRATION_LANGUAGE_LABELS } from "@/lib/constants";
 import { formatTimestampIN } from "@/lib/format-date";
 import type {
+  ChasePreview,
   DeliveryAttemptRow,
   DeliveryRequestCreatedResponse,
   DeliverySendResponse,
@@ -308,6 +309,34 @@ function ChaseModal({
 }) {
   const [number, setNumber] = useState(prefill?.whatsapp_number ?? "");
   const [language, setLanguage] = useState<NarrationLanguage>("en");
+  const [preview, setPreview] = useState<ChasePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Fetch the chase message preview whenever the language changes.
+  // The preview is language-dependent — a Kannada CA-approved message
+  // needs to be reviewable in Kannada, not translated after the fact.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setPreviewLoading(true);
+      try {
+        const p = await api<ChasePreview>(
+          `/whatsapp/preview/chase?match_result_id=${match.id}&language=${language}`,
+        );
+        if (!cancelled) setPreview(p);
+      } catch {
+        // Non-fatal: the preview is a convenience. The send path uses
+        // the same renderer server-side.
+        if (!cancelled) setPreview(null);
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [match.id, language]);
   // Default: opt-in to save when this is a NEW supplier (no prefill),
   // opt-out when we already had a directory entry (the CA presumably
   // just wants to send with the on-file number).
@@ -341,6 +370,35 @@ function ChaseModal({
           )}
         </div>
       )}
+
+      {/* Chase preview — the exact prose the supplier will read. */}
+      <div
+        className="bg-paper border border-rule rounded-md p-3"
+        data-testid="chase-preview"
+      >
+        <div className="text-xs uppercase tracking-wide text-ink-muted font-semibold mb-1">
+          Preview · {NARRATION_LANGUAGE_LABELS[language]}
+          {preview && (
+            <span className="ml-2 normal-case font-normal text-ink-muted">
+              · template <span className="font-mono">{preview.template_name}</span>
+            </span>
+          )}
+        </div>
+        {previewLoading && (
+          <p className="text-xs text-ink-muted italic">Loading preview…</p>
+        )}
+        {preview && (
+          <pre className="text-sm text-ink whitespace-pre-wrap font-sans border-l-2 border-accent pl-3">
+            {preview.body}
+          </pre>
+        )}
+        {!previewLoading && !preview && (
+          <p className="text-xs text-ink-muted italic">
+            Preview unavailable — send will still use the same server-rendered
+            body under the hood.
+          </p>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="block text-sm">

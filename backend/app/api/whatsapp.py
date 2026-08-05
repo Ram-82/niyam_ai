@@ -92,6 +92,17 @@ class DeliveryAttemptRow(BaseModel):
     failed_at: Optional[datetime] = None
 
 
+class ChasePreviewResp(BaseModel):
+    """Powers the chase modal preview so the CA sees the exact prose
+    the supplier will read before Approve & Send."""
+    language: str
+    template_name: str
+    body: str
+    supplier_name: Optional[str] = None
+    supplier_gstin: str
+    firm_name: str
+
+
 # ---------------------------------------------------------------------------
 # Endpoints — auth-gated
 # ---------------------------------------------------------------------------
@@ -226,6 +237,83 @@ def send_delivery(
         provider=result.provider,
         provider_message_id=result.provider_message_id,
         status=result.status,
+    )
+
+
+@router.get("/preview/chase", response_model=ChasePreviewResp)
+def preview_chase(
+    match_result_id: uuid.UUID = Query(...),
+    language: str = Query(default="en", pattern=r"^(en|hi|kn|mr)$"),
+    user: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> ChasePreviewResp:
+    """Render the chase body the supplier will read.
+
+    No delivery_request is created — this is a pure preview. The CA
+    sees the exact prose in the modal before Approve & Send. Reads the
+    match_result's invoice (via LEFT JOIN) for amount/invoice_number/
+    date, and any existing supplier_contact for a friendly ``name``.
+    """
+    from app.whatsapp.chase_template import (
+        ChaseTemplateContext,
+        render_chase_body,
+    )
+
+    row = session.execute(
+        text(
+            """
+            SELECT
+                mr.bucket::text AS bucket,
+                COALESCE(i.counterparty_gstin, be.supplier_gstin) AS supplier_gstin,
+                i.invoice_number,
+                i.invoice_date,
+                i.total_paise,
+                cf.name AS firm_name,
+                sc.name AS supplier_name
+            FROM match_result mr
+            LEFT JOIN invoice i ON i.id = mr.invoice_id
+            LEFT JOIN b2b_entry be ON be.id = mr.b2b_entry_id
+            LEFT JOIN ca_firm cf ON cf.id = mr.firm_id
+            LEFT JOIN supplier_contact sc
+                   ON sc.firm_id = mr.firm_id
+                  AND sc.supplier_gstin = COALESCE(i.counterparty_gstin, be.supplier_gstin)
+            WHERE mr.id = :id
+            """
+        ),
+        {"id": str(match_result_id)},
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="match_result_not_found")
+    if row["bucket"] != "supplier_default":
+        raise HTTPException(
+            status_code=400,
+            detail="chase preview only applies to supplier_default matches",
+        )
+    if not row["supplier_gstin"]:
+        raise HTTPException(
+            status_code=422, detail="match_result has no resolvable supplier_gstin"
+        )
+
+    ctx = ChaseTemplateContext(
+        firm_name=row["firm_name"] or "your CA firm",
+        supplier_name=row["supplier_name"] or "",
+        supplier_gstin=row["supplier_gstin"],
+        invoice_number=row["invoice_number"] or "",
+        invoice_date_iso=(
+            row["invoice_date"].isoformat()
+            if row["invoice_date"] is not None
+            else ""
+        ),
+        invoice_amount_paise=int(row["total_paise"] or 0),
+    )
+    body = render_chase_body(ctx, language=language)  # type: ignore[arg-type]
+    return ChasePreviewResp(
+        language=language,
+        template_name=settings.whatsapp_template_chase_name,
+        body=body,
+        supplier_name=row["supplier_name"] or None,
+        supplier_gstin=row["supplier_gstin"],
+        firm_name=row["firm_name"] or "your CA firm",
     )
 
 

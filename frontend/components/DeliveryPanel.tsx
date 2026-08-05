@@ -64,13 +64,19 @@ export function DeliveryPanel({
   gstinProfileId,
   period,
   returnType,
+  clientId,
   clientWhatsappNumber,
+  clientDefaultLanguage,
 }: {
   gstinProfileId: string;
   period: string;
   returnType: "GSTR1" | "GSTR3B";
-  /** Prefill for the phone number field. Optional — the CA can override. */
+  /** Optional — enables the "save number to client" toggle in the modal. */
+  clientId?: string;
+  /** Prefill for the phone number field. */
   clientWhatsappNumber?: string;
+  /** Prefill for the language field (defaults to en if omitted). */
+  clientDefaultLanguage?: NarrationLanguage;
 }) {
   const [panel, setPanel] = useState<Panel>({ state: "idle" });
   const [attempts, setAttempts] = useState<DeliveryAttemptRow[]>([]);
@@ -155,10 +161,29 @@ export function DeliveryPanel({
     whatsappNumber: string;
     language: NarrationLanguage;
     templateName?: string;
+    saveToClient: boolean;
   }) {
     if (panel.state !== "preparing") return;
     setError(null);
     try {
+      // 0. (optional) Persist the number on the client record so next
+      //    session prefills without CA input. Runs before the send so
+      //    a send failure still leaves the client record updated.
+      if (payload.saveToClient && clientId) {
+        try {
+          await api(`/clients/${clientId}`, {
+            method: "PATCH",
+            body: { whatsapp_number: payload.whatsappNumber },
+          });
+        } catch (e) {
+          // Non-fatal: surface via error strip but proceed with send.
+          setError(
+            `Saving to client record failed: ${
+              e instanceof Error ? e.message : String(e)
+            }. Proceeding with send.`,
+          );
+        }
+      }
       // 1. Create request.
       const created = await api<DeliveryRequestCreatedResponse>(
         "/whatsapp/delivery-requests",
@@ -177,8 +202,7 @@ export function DeliveryPanel({
       await api(`/whatsapp/delivery-requests/${reqId}/approve`, {
         method: "POST",
       });
-      // 3. Send (no PDF from this UI yet — a follow-up wires a template-
-      // rendered PDF; the mock transport accepts empty media).
+      // 3. Send — the backend auto-renders the PDF from the narration_run.
       const sent = await api<DeliverySendResponse>(
         `/whatsapp/delivery-requests/${reqId}/send`,
         { method: "POST", body: {} },
@@ -241,6 +265,8 @@ export function DeliveryPanel({
         <PrepareModal
           narration={panel.narration}
           defaultNumber={clientWhatsappNumber || ""}
+          defaultLanguage={clientDefaultLanguage || panel.narration.language}
+          allowSaveToClient={!!clientId}
           onCancel={() =>
             setPanel({ state: "narration_ready", narration: panel.narration })
           }
@@ -300,23 +326,33 @@ function NoNarrationCallout({
 function PrepareModal({
   narration,
   defaultNumber,
+  defaultLanguage,
+  allowSaveToClient,
   onCancel,
   onSubmit,
 }: {
   narration: NarrationOutput;
   defaultNumber: string;
+  defaultLanguage: NarrationLanguage;
+  allowSaveToClient: boolean;
   onCancel: () => void;
   onSubmit: (payload: {
     whatsappNumber: string;
     language: NarrationLanguage;
     templateName?: string;
+    saveToClient: boolean;
   }) => void;
 }) {
   const [number, setNumber] = useState(defaultNumber);
-  const [language, setLanguage] = useState<NarrationLanguage>(narration.language);
+  const [language, setLanguage] = useState<NarrationLanguage>(defaultLanguage);
+  // Default: opt-in to save when we didn't have a stored number (or
+  // the CA changed the prefilled one). Opt-out when the number was
+  // prefilled and unchanged.
+  const [saveToClient, setSaveToClient] = useState(defaultNumber === "");
   const [submitting, setSubmitting] = useState(false);
 
   const validE164 = /^\+[1-9]\d{7,14}$/.test(number.trim());
+  const numberChanged = number.trim() !== defaultNumber;
 
   return (
     <div
@@ -376,12 +412,35 @@ function PrepareModal({
         </label>
       </div>
 
+      {allowSaveToClient && (
+        <label className="flex items-start gap-2 text-xs text-ink">
+          <input
+            type="checkbox"
+            checked={saveToClient}
+            onChange={(e) => setSaveToClient(e.target.checked)}
+            className="mt-0.5"
+            data-testid="save-to-client"
+          />
+          <span>
+            {defaultNumber
+              ? numberChanged
+                ? "Update the client's stored WhatsApp number so next send prefills the new number."
+                : "Overwrite the stored client number (unchanged — usually leave this off)."
+              : "Save this WhatsApp number to the client record so the next send prefills it."}
+          </span>
+        </label>
+      )}
+
       <div className="flex gap-3">
         <button
           onClick={async () => {
             setSubmitting(true);
             try {
-              await onSubmit({ whatsappNumber: number.trim(), language });
+              await onSubmit({
+                whatsappNumber: number.trim(),
+                language,
+                saveToClient: allowSaveToClient && saveToClient,
+              });
             } finally {
               setSubmitting(false);
             }

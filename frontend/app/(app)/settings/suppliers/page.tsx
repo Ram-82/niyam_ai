@@ -28,9 +28,24 @@ const btnDangerCls =
   "px-2 py-1 text-xs bg-paper border border-rule text-red-fg font-semibold rounded-sm hover:border-red-fg transition-colors duration-fast";
 
 
+type EditDraft = {
+  name: string;
+  whatsapp_number: string;
+  email: string;
+  notes: string;
+};
+
+
 export default function SuppliersPage() {
   const [rows, setRows] = useState<SupplierContactRow[] | null>(null);
   const [q, setQ] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<EditDraft>({
+    name: "",
+    whatsapp_number: "",
+    email: "",
+    notes: "",
+  });
   const [message, setMessage] = useState<{
     kind: "ok" | "error";
     text: string;
@@ -92,6 +107,53 @@ export default function SuppliersPage() {
     }
   }
 
+  function startEdit(row: SupplierContactRow) {
+    setEditingId(row.id);
+    setDraft({
+      name: row.name,
+      whatsapp_number: row.whatsapp_number ?? "",
+      email: row.email ?? "",
+      notes: row.notes ?? "",
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
+
+  async function saveEdit(row: SupplierContactRow) {
+    setMessage(null);
+    // Only send fields that actually differ from the current row —
+    // matches the API's PATCH semantics (touch supplied fields only).
+    const body: Record<string, string | null> = {};
+    if (draft.name !== row.name) body.name = draft.name;
+    if ((draft.whatsapp_number || null) !== (row.whatsapp_number || null))
+      body.whatsapp_number = draft.whatsapp_number || null;
+    if ((draft.email || null) !== (row.email || null))
+      body.email = draft.email || null;
+    if ((draft.notes || null) !== (row.notes || null))
+      body.notes = draft.notes || null;
+    if (Object.keys(body).length === 0) {
+      setEditingId(null);
+      return;
+    }
+    try {
+      await api(`/supplier-contacts/${row.id}`, { method: "PATCH", body });
+      setMessage({ kind: "ok", text: `Updated ${draft.name || row.name}.` });
+      setEditingId(null);
+      refresh();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 400) {
+        setMessage({
+          kind: "error",
+          text: `Rejected: ${err.message}. Check the E.164 phone format.`,
+        });
+      } else {
+        setMessage({ kind: "error", text: String(err) });
+      }
+    }
+  }
+
   async function remove(row: SupplierContactRow) {
     if (
       !confirm(
@@ -108,17 +170,30 @@ export default function SuppliersPage() {
     }
   }
 
+  const isEditing = (r: SupplierContactRow) => editingId === r.id;
+
   const columns: Column<SupplierContactRow>[] = [
     {
       key: "name",
       header: "Supplier",
-      cell: (r) => <span className="text-ink font-semibold">{r.name}</span>,
+      cell: (r) =>
+        isEditing(r) ? (
+          <input
+            value={draft.name}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            className={inputCls + " w-full"}
+            data-testid="edit-name"
+          />
+        ) : (
+          <span className="text-ink font-semibold">{r.name}</span>
+        ),
       sortable: true,
       sortValue: (r) => r.name.toLowerCase(),
     },
     {
       key: "gstin",
       header: "GSTIN",
+      // GSTIN is the identity of the row — not editable.
       cell: (r) => <span className="font-mono text-xs">{r.supplier_gstin}</span>,
       sortable: true,
       sortValue: (r) => r.supplier_gstin,
@@ -128,7 +203,17 @@ export default function SuppliersPage() {
       key: "wa",
       header: "WhatsApp",
       cell: (r) =>
-        r.whatsapp_number ? (
+        isEditing(r) ? (
+          <input
+            value={draft.whatsapp_number}
+            onChange={(e) =>
+              setDraft({ ...draft, whatsapp_number: e.target.value })
+            }
+            placeholder="+91XXXXXXXXXX"
+            className={inputCls + " w-full font-mono"}
+            data-testid="edit-whatsapp"
+          />
+        ) : r.whatsapp_number ? (
           <span className="font-mono text-xs">{r.whatsapp_number}</span>
         ) : (
           <span className="text-ink-muted italic text-xs">—</span>
@@ -139,7 +224,15 @@ export default function SuppliersPage() {
       key: "email",
       header: "Email",
       cell: (r) =>
-        r.email ? (
+        isEditing(r) ? (
+          <input
+            value={draft.email}
+            type="email"
+            onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+            className={inputCls + " w-full"}
+            data-testid="edit-email"
+          />
+        ) : r.email ? (
           <span className="font-mono text-xs">{r.email}</span>
         ) : (
           <span className="text-ink-muted italic text-xs">—</span>
@@ -160,13 +253,39 @@ export default function SuppliersPage() {
     {
       key: "action",
       header: "",
-      cell: (r) => (
-        <button onClick={() => remove(r)} className={btnDangerCls}>
-          Delete
-        </button>
-      ),
+      cell: (r) =>
+        isEditing(r) ? (
+          <span className="flex gap-1 justify-end">
+            <button
+              onClick={() => saveEdit(r)}
+              className={btnPrimaryCls}
+              data-testid="save-edit"
+            >
+              Save
+            </button>
+            <button
+              onClick={cancelEdit}
+              className="px-2 py-1 text-xs border border-rule bg-paper text-ink rounded-sm hover:border-rule-strong"
+            >
+              Cancel
+            </button>
+          </span>
+        ) : (
+          <span className="flex gap-1 justify-end">
+            <button
+              onClick={() => startEdit(r)}
+              className="px-2 py-1 text-xs bg-paper border border-rule text-ink font-semibold rounded-sm hover:border-rule-strong"
+              data-testid="edit-row"
+            >
+              Edit
+            </button>
+            <button onClick={() => remove(r)} className={btnDangerCls}>
+              Delete
+            </button>
+          </span>
+        ),
       align: "right",
-      width: "6rem",
+      width: "10rem",
     },
   ];
 

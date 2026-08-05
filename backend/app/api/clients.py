@@ -28,15 +28,40 @@ GSTIN_STRUCTURAL_RE = re.compile(
 )
 
 
+_E164_RE = re.compile(r"^\+[1-9]\d{7,14}$")
+
+
 class ClientCreateRequest(BaseModel):
     trade_name: str = Field(min_length=1, max_length=200)
     language: str = Field(default="en", max_length=8)
+    whatsapp_number: Optional[str] = Field(default=None, max_length=20)
+
+
+class ClientPatchRequest(BaseModel):
+    """PATCH — every field optional; ``None`` means "leave as-is",
+    empty-string on whatsapp_number means "clear it"."""
+    trade_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    language: Optional[str] = Field(default=None, max_length=8)
+    whatsapp_number: Optional[str] = Field(default=None, max_length=20)
 
 
 class ClientResponse(BaseModel):
     id: uuid.UUID
     trade_name: str
     language: str
+    whatsapp_number: Optional[str] = None
+
+
+class ClientForGstinResponse(BaseModel):
+    """Shape the workspace prefill wants: gstin + client details in
+    one round trip so DeliveryPanel can render without a separate
+    /clients round-trip."""
+    gstin_profile_id: uuid.UUID
+    gstin: str
+    client_id: uuid.UUID
+    trade_name: str
+    language: str
+    whatsapp_number: Optional[str] = None
 
 
 class GstinCreateRequest(BaseModel):
@@ -63,7 +88,7 @@ def list_clients(
     user: AppUser = Depends(get_current_user),
     session=Depends(get_firm_scoped_session),
 ) -> list[ClientResponse]:
-    sql = "SELECT id, trade_name, language FROM client"
+    sql = "SELECT id, trade_name, language, whatsapp_number FROM client"
     params: dict = {}
     if user.role == "staff":
         sql += (
@@ -91,17 +116,20 @@ def create_client(
     admin: AppUser = Depends(require_admin),
     session=Depends(get_firm_scoped_session),
 ) -> ClientResponse:
+    if payload.whatsapp_number and not _E164_RE.match(payload.whatsapp_number):
+        raise HTTPException(status_code=400, detail="invalid_e164_number")
     client_id = uuid.uuid4()
     session.execute(
         text(
-            "INSERT INTO client (id, firm_id, trade_name, language) "
-            "VALUES (:id, :firm_id, :name, :lang)"
+            "INSERT INTO client (id, firm_id, trade_name, language, whatsapp_number) "
+            "VALUES (:id, :firm_id, :name, :lang, :wn)"
         ),
         {
             "id": str(client_id),
             "firm_id": str(admin.firm_id),
             "name": payload.trade_name,
             "lang": payload.language,
+            "wn": payload.whatsapp_number or None,
         },
     )
     audit.record(
@@ -119,8 +147,77 @@ def create_client(
         },
     )
     return ClientResponse(
-        id=client_id, trade_name=payload.trade_name, language=payload.language
+        id=client_id,
+        trade_name=payload.trade_name,
+        language=payload.language,
+        whatsapp_number=payload.whatsapp_number or None,
     )
+
+
+@router.patch("/{client_id}", response_model=ClientResponse)
+def patch_client(
+    client_id: uuid.UUID,
+    payload: ClientPatchRequest,
+    user: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> ClientResponse:
+    """PATCH client fields (name, language, whatsapp_number).
+
+    Non-admin can update this too — this endpoint is what the workspace
+    calls when the CA opts into "save this number to the client record"
+    after a delivery send. Restricting to admin would create a poor
+    surface where every send needs an admin round-trip.
+    """
+    if payload.whatsapp_number and payload.whatsapp_number != "" and not _E164_RE.match(payload.whatsapp_number):
+        raise HTTPException(status_code=400, detail="invalid_e164_number")
+    updates: list[str] = []
+    params: dict = {"id": str(client_id)}
+    changed: dict = {}
+    if payload.trade_name is not None:
+        updates.append("trade_name = :trade_name")
+        params["trade_name"] = payload.trade_name
+        changed["trade_name"] = payload.trade_name
+    if payload.language is not None:
+        updates.append("language = :language")
+        params["language"] = payload.language
+        changed["language"] = payload.language
+    if payload.whatsapp_number is not None:
+        updates.append("whatsapp_number = :whatsapp_number")
+        params["whatsapp_number"] = payload.whatsapp_number or None
+        changed["whatsapp_number"] = payload.whatsapp_number or None
+    if not updates:
+        # No-op: return current row.
+        row = session.execute(
+            text(
+                "SELECT id, trade_name, language, whatsapp_number "
+                "FROM client WHERE id = :id"
+            ),
+            {"id": str(client_id)},
+        ).mappings().first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="client not found")
+        return ClientResponse(**dict(row))
+    row = session.execute(
+        text(
+            "UPDATE client "
+            f"SET {', '.join(updates)} "
+            "WHERE id = :id "
+            "RETURNING id, trade_name, language, whatsapp_number"
+        ),
+        params,
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="client not found")
+    audit.record(
+        session,
+        firm_id=user.firm_id,
+        actor_user_id=user.id,
+        action="client.updated",
+        entity_type="client",
+        entity_id=client_id,
+        metadata={"after": changed},
+    )
+    return ClientResponse(**dict(row))
 
 
 # ---------------------------------------------------------------------------

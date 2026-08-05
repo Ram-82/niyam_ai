@@ -146,6 +146,17 @@ export interface Client {
   id: string;
   trade_name: string;
   language: string;
+  whatsapp_number?: string | null;
+}
+
+
+export interface GstinClientInfo {
+  gstin_profile_id: string;
+  gstin: string;
+  client_id: string;
+  trade_name: string;
+  language: string;
+  whatsapp_number: string | null;
 }
 
 export interface User {
@@ -340,4 +351,14 @@ export interface SupplierContactRow {
   created_at: string;
   updated_by: string | null;
   updated_at: string;
+}
+
+
+export interface ChasePreview {
+  language: NarrationLanguage;
+  template_name: string;
+  body: string;
+  supplier_name: string | null;
+  supplier_gstin: string;
+  firm_name: string;
 }
