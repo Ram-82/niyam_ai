@@ -51,6 +51,11 @@ class CommandCenterRow(BaseModel):
     days_to_due_date: Optional[int]
     itc_at_risk_paise: int
     blockers_count: int
+    # Split of ``blockers_count`` by owner. blockers_count == blockers_ca +
+    # blockers_client by construction — the dashboard renders both so the CA
+    # sees at a glance how much of a row is "on us" vs "on the client".
+    blockers_ca: int
+    blockers_client: int
     last_computed_at: Optional[datetime]
 
 
@@ -133,6 +138,8 @@ def command_center(
             recon.get("supplier_default", {}).get("paise", 0)
         )
         blockers = r["blockers"] or []
+        blockers_ca = sum(1 for b in blockers if b.get("owner") == "ca")
+        blockers_client = sum(1 for b in blockers if b.get("owner") == "client")
 
         out.append(
             CommandCenterRow(
@@ -147,6 +154,8 @@ def command_center(
                 days_to_due_date=days_remaining,
                 itc_at_risk_paise=itc_at_risk,
                 blockers_count=len(blockers),
+                blockers_ca=blockers_ca,
+                blockers_client=blockers_client,
                 last_computed_at=r["computed_at"],
             )
         )

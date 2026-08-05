@@ -1,0 +1,89 @@
+/*
+ * Niyam AI design tokens — single source of truth.
+ *
+ * If a colour, size, or weight is not in this file, do not use it.
+ * Any component reaching for a value outside these tokens is a code
+ * smell to fix in review.
+ *
+ * Palette rationale: paper + ink + rule form the ledger substrate;
+ * one accent (deep institutional blue) marks interactive elements;
+ * three semantic ramps (amber / red / green) carry meaning only —
+ * never decoration.
+ *
+ * Contrast: every on-tint foreground pair verified AA at --text-sm:
+ *   amber #92400E on #FEF3E2 = 6.46:1
+ *   red   #991B1B on #FDECEC = 7.27:1
+ *   green #166534 on #EAF5EB = 6.36:1
+ */
+
+:root {
+  /* ── Palette ── */
+  --paper: #F5F3EE;
+  --paper-raised: #FFFFFF;         /* cards + inputs sit slightly above paper */
+  --ink: #111319;
+  --ink-muted: #4B5162;            /* secondary labels — still ink family, not grey */
+  --rule: #D9D4C9;
+  --rule-strong: #B8B0A0;          /* focus rings + emphasized dividers */
+  --accent: #1E3A5F;
+  --accent-hover: #142744;
+  --accent-tint: #E4E9F1;          /* selected tab background, subtle active state */
+
+  --amber-fg: #92400E;
+  --amber-bg: #FEF3E2;
+  --amber-strong: #B45309;         /* icons/arcs where FG-on-BG doesn't apply */
+  --red-fg: #991B1B;
+  --red-bg: #FDECEC;
+  --red-strong: #B91C1C;
+  --green-fg: #166534;
+  --green-bg: #EAF5EB;
+  --green-strong: #15803D;
+
+  /* Grey ramp — one grey only, aliased for readability. Used for
+     "not yet scored," missing_entry bucket, disabled affordances.
+     Disclaimer text does NOT use these — it uses --ink (per condition #1). */
+  --grey-fg: #5A6070;
+  --grey-bg: #EDEBE5;
+
+  /* ── Typography scale ──
+   * Larger, Claude-like reading register. Body base at 16px, generous
+   * line-heights, one display serif (Source Serif 4) for page titles.
+   * Data mono face unchanged — tabular figures still lock. */
+  --text-xs: 0.75rem;      /* 12px — helper text, footnotes, disclaimer captions */
+  --text-sm: 0.875rem;     /* 14px — table body, dense labels */
+  --text-base: 1rem;       /* 16px — default UI */
+  --text-lg: 1.125rem;     /* 18px — section headings, tab labels */
+  --text-xl: 1.5rem;       /* 24px — tile numeric values */
+  --text-display: 2rem;    /* 32px — PageHeader h1 (serif) */
+  --text-score: 2.75rem;   /* 44px — score digit, the signature */
+
+  --weight-normal: 400;
+  --weight-semibold: 600;
+
+  --line-height-tight: 1.2;
+  --line-height-normal: 1.45;
+
+  /* ── Radii ── */
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* ── Spacing scale (4px base) ── */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* ── Motion ── */
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --easing: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+  }
+}

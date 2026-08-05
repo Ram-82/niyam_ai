@@ -1,12 +1,54 @@
+@import "../lib/tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 html, body {
   height: 100%;
+  background: var(--paper);
+  color: var(--ink);
 }
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #111;
-  background: #fafafa;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: var(--text-base);
+  line-height: var(--line-height-normal);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Data face — money, scores, GSTINs, invoice numbers, periods, dates.
+   Any element with `.font-mono` inherits monospace + tabular-nums
+   figure locking. Applied to <td> cells that carry numeric or
+   identifier content. */
+.font-mono, .font-mono * {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+/* Global focus ring — always visible for keyboard navigation.
+   Removed only when the user is clicking (`:focus-visible` gate). */
+*:focus { outline: none; }
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Print — CAs print the command center during filing week. Hide chrome,
+   force high-contrast black-on-white, keep the ruled grid on the table. */
+@media print {
+  html, body { background: #ffffff !important; color: #000000 !important; }
+  header, nav, button, [data-testid="logout"], [data-testid="period-nav"] {
+    display: none !important;
+  }
+  main { max-width: 100% !important; padding: 0 !important; }
+  table { border-collapse: collapse !important; width: 100% !important; }
+  th, td {
+    border: 1px solid #000 !important;
+    padding: 6px 8px !important;
+    color: #000 !important;
+  }
+  a { color: #000 !important; text-decoration: none !important; }
 }

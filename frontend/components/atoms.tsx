@@ -1,19 +1,23 @@
 /**
  * Small display atoms shared across pages. Each one enforces one of
- * the step-9 acceptance criteria so a criterion regression can only
- * happen by editing this file.
+ * the load-bearing honesty features — restyled, never reworded.
  */
-import Link from "next/link";
 import { CDN_DISCLAIMER } from "@/lib/constants";
 import { formatPaise } from "@/lib/format";
+import { formatDateIN } from "@/lib/format-date";
+import { ScoreBadge } from "@/components/ScoreBadge";
 import type { Blocker } from "@/lib/types";
 
 
 /**
- * Criterion #1: every ITC figure renders with the CDN disclaimer.
- * Use ``variant="tooltip"`` for column headers/cells (native title
- * attribute so it's screenreader-visible), ``variant="footnote"`` for
- * summary panels where a visible caption is warranted.
+ * Criterion #1 (from step 9) + stage-1 condition #1:
+ * every ITC figure renders with the CDN disclaimer.
+ *
+ * ``variant="tooltip"`` — inline cell. Adds a dotted-underline
+ * affordance under the money so hovering is discoverable and the
+ * native title attribute carries the disclaimer text.
+ * ``variant="footnote"`` — the disclaimer renders visibly beside the
+ * value at --text-xs in --ink (never lightened grey), per condition #1.
  */
 export function ITCCell({
   paise,
@@ -25,16 +29,19 @@ export function ITCCell({
   const formatted = formatPaise(paise);
   if (variant === "footnote") {
     return (
-      <span className="font-mono">
+      <span className="font-mono inline-flex items-baseline gap-2">
         {formatted}
-        <span className="ml-2 text-xs text-neutral-500">
+        <span className="text-xs text-ink italic">
           ({CDN_DISCLAIMER})
         </span>
       </span>
     );
   }
   return (
-    <span className="font-mono" title={CDN_DISCLAIMER}>
+    <span
+      className="font-mono border-b border-dotted border-ink-muted cursor-help"
+      title={CDN_DISCLAIMER}
+    >
       {formatted}
     </span>
   );
@@ -42,62 +49,59 @@ export function ITCCell({
 
 
 /**
- * Column header helper: adds an aria-friendly tooltip carrying the
- * CDN disclaimer. Wraps the label text; append " (ⓘ)" so users know
- * to hover.
+ * Column-header helper: dotted underline + ⓘ glyph so the CDN
+ * disclaimer tooltip is discoverable. Never abbreviated away.
  */
 export function ITCHeader({ label }: { label: string }) {
   return (
-    <span title={CDN_DISCLAIMER}>
-      {label} <span className="text-neutral-400">ⓘ</span>
+    <span
+      className="inline-flex items-center gap-1 border-b border-dotted border-ink-muted cursor-help"
+      title={CDN_DISCLAIMER}
+    >
+      {label}
+      <span aria-hidden="true" className="text-ink-muted">ⓘ</span>
     </span>
   );
 }
 
 
 /**
- * Criterion #3: NULL score renders as "Not yet scored", never 0/blank.
- * Colour-coded when the score is present.
+ * NULL score renders as "Not yet scored", never 0/blank. Delegates
+ * to ScoreBadge — the single visual treatment for score everywhere.
  */
-export function ScoreCell({ score }: { score: number | null }) {
-  if (score === null) {
-    return (
-      <span className="text-neutral-500 italic" data-testid="not-yet-scored">
-        Not yet scored
-      </span>
-    );
-  }
-  const colour =
-    score >= 80 ? "text-green-700"
-    : score >= 60 ? "text-amber-700"
-    : "text-red-700";
-  return (
-    <span className={`font-mono font-semibold ${colour}`}>{score}</span>
-  );
+export function ScoreCell({
+  score,
+  size = "sm",
+}: {
+  score: number | null;
+  size?: "sm" | "md" | "lg";
+}) {
+  return <ScoreBadge score={score} size={size} />;
 }
 
 
 /**
- * Criterion #5: blockers render owner + paise_impact.
+ * Blockers render owner + paise_impact — the sort key of the
+ * command center. Restyled, semantics + testids untouched.
  */
 export function BlockersList({ blockers }: { blockers: Blocker[] }) {
   if (blockers.length === 0) {
-    return <p className="text-sm text-neutral-500">No blockers.</p>;
+    return <p className="text-sm text-ink-muted">No blockers.</p>;
   }
   return (
-    <ul className="divide-y divide-neutral-200 border border-neutral-200 rounded">
+    <ul className="divide-y divide-rule border border-rule rounded-md bg-paper-raised">
       {blockers.map((b) => (
         <li key={b.code} className="p-3 flex items-start gap-3">
           <OwnerBadge owner={b.owner} />
-          <div className="flex-1">
-            <div className="text-sm font-medium">{b.description}</div>
-            <div className="text-xs text-neutral-500">{b.code}</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm text-ink">{b.description}</div>
+            <div className="text-xs text-ink-muted font-mono mt-0.5">{b.code}</div>
           </div>
-          <div className="text-right">
+          <div className="text-right whitespace-nowrap">
             {b.paise_impact > 0 ? (
               <ITCCell paise={b.paise_impact} />
             ) : (
-              <span className="text-xs text-neutral-400">—</span>
+              <span className="text-xs text-ink-muted">—</span>
             )}
           </div>
         </li>
@@ -111,10 +115,10 @@ export function OwnerBadge({ owner }: { owner: "ca" | "client" }) {
   const label = owner === "ca" ? "CA" : "Client";
   const cls =
     owner === "ca"
-      ? "bg-blue-100 text-blue-800"
-      : "bg-purple-100 text-purple-800";
+      ? "bg-accent-tint text-accent"
+      : "bg-grey-bg text-ink";
   return (
-    <span className={`text-xs px-2 py-0.5 rounded font-medium ${cls}`}>
+    <span className={`text-xs font-semibold px-2 py-0.5 rounded-sm ${cls}`}>
       {label}
     </span>
   );
@@ -122,19 +126,18 @@ export function OwnerBadge({ owner }: { owner: "ca" | "client" }) {
 
 
 /**
- * Criterion #7: anything backed by a stub interface is visibly labelled
- * so a demo doesn't accidentally imply a feature works. Wrap the
- * feature in <StubBadge>Send report to client</StubBadge>.
+ * Anything backed by a stub interface must be visibly labelled so a
+ * demo can't accidentally imply a feature works.
  */
 export function StubBadge({ children }: { children: React.ReactNode }) {
   return (
     <span
-      className="inline-flex items-center gap-1 text-xs bg-yellow-100 text-yellow-900 px-2 py-0.5 rounded border border-yellow-300"
+      className="inline-flex items-center gap-1 text-xs bg-amber-bg text-amber-fg px-2 py-0.5 rounded-sm border border-rule"
       title="This feature is stubbed. Wired up in P2."
     >
-      <span aria-hidden>⚙</span>
+      <span aria-hidden="true">⚙</span>
       {children}
-      <span className="uppercase tracking-wide text-[10px] opacity-70">
+      <span className="uppercase tracking-wide text-[10px] opacity-80">
         stubbed
       </span>
     </span>
@@ -143,9 +146,9 @@ export function StubBadge({ children }: { children: React.ReactNode }) {
 
 
 /**
- * Criterion #4: score click opens the persisted arithmetic JSONB.
- * The panel is presentational only — it does no math, just renders
- * whatever the API returned.
+ * Score click opens the persisted arithmetic JSONB — presentational
+ * only, no math. Rule pack version + computed_for_date are shown so
+ * the reader knows exactly which snapshot they're staring at.
  */
 export function ArithmeticPanel({
   arithmetic,
@@ -167,34 +170,34 @@ export function ArithmeticPanel({
 }) {
   if (!arithmetic.components) {
     return (
-      <div className="text-sm text-neutral-500 italic">
+      <div className="text-sm text-ink-muted italic">
         No stored arithmetic — trigger a score to compute one.
       </div>
     );
   }
   return (
     <div className="text-sm">
-      <p className="mb-2 text-neutral-600">
+      <p className="mb-3 text-ink-muted">
         Score computed under rule_pack{" "}
-        <span className="font-mono">{arithmetic.rule_pack_version}</span>
+        <span className="font-mono text-ink">{arithmetic.rule_pack_version}</span>
         {arithmetic.computed_for_date && (
-          <> on {arithmetic.computed_for_date}</>
+          <> on <span className="font-mono text-ink">{arithmetic.computed_for_date}</span></>
         )}
         . Values below are the stored math, not a recomputation.
       </p>
-      <table className="w-full text-xs border border-neutral-200">
-        <thead className="bg-neutral-50">
+      <table className="w-full text-xs border border-rule rounded-md overflow-hidden">
+        <thead className="bg-paper text-ink-muted uppercase tracking-wide">
           <tr>
             <th className="text-left p-2">Component</th>
             <th className="text-right p-2">Value</th>
-            <th className="text-right p-2">Raw&nbsp;wt</th>
-            <th className="text-right p-2">Norm&nbsp;wt</th>
+            <th className="text-right p-2">Raw wt</th>
+            <th className="text-right p-2">Norm wt</th>
             <th className="text-right p-2">Weighted</th>
           </tr>
         </thead>
         <tbody>
           {arithmetic.components.map((c) => (
-            <tr key={c.name} className="border-t border-neutral-200">
+            <tr key={c.name} className="border-t border-rule">
               <td className="p-2 font-mono">{c.name}</td>
               <td className="p-2 text-right font-mono">{c.value.toFixed(2)}</td>
               <td className="p-2 text-right font-mono">{c.raw_weight}</td>
@@ -207,7 +210,7 @@ export function ArithmeticPanel({
             </tr>
           ))}
         </tbody>
-        <tfoot className="bg-neutral-50 font-semibold">
+        <tfoot className="bg-paper font-semibold">
           <tr>
             <td className="p-2" colSpan={4}>
               Weighted sum → Final score
@@ -224,9 +227,9 @@ export function ArithmeticPanel({
 
 
 /**
- * Criterion #2: near_misses render as a review list. The chase action
- * IS the "confirm as match" button on each near-miss row — never a
- * one-click "chase supplier" button that skips this review.
+ * NearMissReview — both empty and populated states render (an
+ * ungated supplier_default row is never a reachable state). Copy is
+ * verbatim from the step-9 acceptance criteria — restyled only.
  */
 export function NearMissReview({
   nearMisses,
@@ -237,16 +240,13 @@ export function NearMissReview({
   >;
   onConfirm?: (b2bEntryId: string) => void;
 }) {
-  // An ungated supplier_default row must never be a reachable state.
-  // Both branches below explicitly frame "supplier default" as a
-  // hypothesis, not a conclusion.
   if (nearMisses.length === 0) {
     return (
       <div
-        className="text-sm p-3 bg-neutral-50 border border-neutral-200 rounded"
+        className="text-sm p-3 bg-paper border border-rule rounded-md text-ink"
         data-testid="near-miss-empty"
       >
-        <span className="font-medium">
+        <span className="font-semibold">
           No same-supplier candidates found.
         </span>{" "}
         Verify register entry details (supplier GSTIN, invoice number,
@@ -256,26 +256,26 @@ export function NearMissReview({
   }
   return (
     <div className="space-y-2" data-testid="near-miss-list">
-      <p className="text-sm font-medium text-amber-900 bg-amber-50 border border-amber-200 rounded p-2">
+      <p className="text-sm font-semibold text-amber-fg bg-amber-bg border border-rule rounded-md p-2">
         Review these possible matches from the same supplier BEFORE
         drafting a chase — the invoice may already be in the 2B under a
         slightly different number or amount.
       </p>
-      <ul className="border border-neutral-200 rounded divide-y">
+      <ul className="border border-rule rounded-md divide-y divide-rule bg-paper-raised">
         {nearMisses.map((nm) => (
           <li key={nm.b2b_entry_id} className="p-3 text-sm">
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-xs text-neutral-500">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="font-mono text-xs text-ink-muted">
                 sim {nm.similarity.toFixed(2)}
               </span>
               <span className="font-mono">{nm.invoice_number}</span>
-              <span className="text-neutral-500">{nm.invoice_date}</span>
+              <span className="text-ink-muted font-mono">{formatDateIN(nm.invoice_date)}</span>
               <span className="ml-auto">
                 <ITCCell paise={nm.total_paise} />
               </span>
               {onConfirm && (
                 <button
-                  className="ml-3 px-2 py-1 text-xs bg-blue-600 text-white rounded"
+                  className="px-2 py-1 text-xs bg-accent text-paper-raised font-semibold rounded-sm hover:bg-accent-hover transition-colors duration-fast"
                   onClick={() => onConfirm(nm.b2b_entry_id)}
                 >
                   This is the match

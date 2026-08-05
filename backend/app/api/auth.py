@@ -97,6 +97,7 @@ class MeResponse(BaseModel):
     id: uuid.UUID
     email: str
     firm_id: uuid.UUID
+    firm_name: str
     role: str
     totp_confirmed: bool
     last_login_at: Optional[datetime]
@@ -304,10 +305,21 @@ def logout(
 
 @router.get("/me", response_model=MeResponse)
 def me(user: AppUser = Depends(get_current_user)) -> MeResponse:
+    # firm_name is added for the dashboard app-shell — a one-row
+    # lookup keyed by the user's own firm_id, RLS-scoped via the
+    # dependency's scoped session.
+    from sqlalchemy import text
+    from app.db import firm_scoped_session
+    with firm_scoped_session(user.firm_id) as session:
+        firm_name = session.execute(
+            text("SELECT name FROM ca_firm WHERE id = :id"),
+            {"id": str(user.firm_id)},
+        ).scalar() or ""
     return MeResponse(
         id=user.id,
         email=str(user.email),
         firm_id=user.firm_id,
+        firm_name=firm_name,
         role=user.role,
         totp_confirmed=user.totp_confirmed,
         last_login_at=user.last_login_at,
