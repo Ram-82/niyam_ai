@@ -178,6 +178,21 @@ export interface User {
   totp_confirmed: boolean;
 }
 
+export interface InviteRow {
+  id: string;
+  email: string;
+  role: "admin" | "staff";
+  expires_at: string;
+  accepted_at: string | null;
+  created_at: string;
+}
+
+export interface InviteCreated {
+  invite_id: string;
+  invite_token: string; // raw token — shown ONCE on creation
+  expires_at: string;
+}
+
 export interface Me {
   id: string;
   email: string;

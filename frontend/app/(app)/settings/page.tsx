@@ -134,6 +134,12 @@ export default function SettingsPage() {
       />
       <nav className="text-xs flex gap-4">
         <a
+          href="/settings/team"
+          className="text-accent hover:text-accent-hover hover:underline font-semibold"
+        >
+          Team & invites →
+        </a>
+        <a
           href="/settings/suppliers"
           className="text-accent hover:text-accent-hover hover:underline font-semibold"
         >
@@ -164,7 +170,8 @@ export default function SettingsPage() {
             emptyState={
               <EmptyState
                 title="No staff users yet"
-                body="Only the firm admin exists so far. Invite staff members via POST /invites (dashboard invite flow ships in the next iteration)."
+                body="Only the firm admin exists so far. Send an invite from Team & invites."
+                action={{ label: "Invite someone", href: "/settings/team" }}
               />
             }
           />
