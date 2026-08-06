@@ -134,6 +134,75 @@ def list_invites(
     ]
 
 
+@router.post(
+    "/{invite_id}/resend",
+    response_model=InviteCreateResponse,
+    status_code=status.HTTP_200_OK,
+)
+def resend_invite(
+    invite_id: uuid.UUID,
+    admin: AppUser = Depends(require_admin),
+    session=Depends(get_firm_scoped_session),
+) -> InviteCreateResponse:
+    """Rotate an existing invite's token + expiry and re-send its email.
+
+    The old raw token stops working the moment ``token_hash`` changes,
+    so a resend also acts as a "revoke and reissue" for a token that
+    might have been leaked to the wrong inbox. Already-accepted invites
+    cannot be resent (the user already exists).
+    """
+    invite = session.get(UserInvite, invite_id)
+    if invite is None:
+        raise HTTPException(status_code=404, detail="invite not found")
+    if invite.accepted_at is not None:
+        raise HTTPException(status_code=409, detail="invite already accepted")
+
+    raw = secrets.token_urlsafe(32)
+    token_hash = hash_invite_token(raw)
+    # Reuse the original invite's TTL — the create-side default was 72h.
+    # We can't re-read the caller's requested ttl_hours, but a fresh
+    # 72h window is the safe/common expectation for a re-send.
+    expires_at = datetime.now(tz=timezone.utc) + timedelta(hours=72)
+    invite.token_hash = token_hash
+    invite.expires_at = expires_at
+    session.flush()
+
+    email_sent = False
+    if settings.email_enabled:
+        firm_name = session.execute(
+            text("SELECT name FROM ca_firm WHERE id = :id"),
+            {"id": str(admin.firm_id)},
+        ).scalar() or ""
+        try:
+            send_invite_email(
+                to=str(invite.email),
+                invite_token=raw,
+                inviter_email=str(admin.email),
+                firm_name=firm_name,
+                role=invite.role,
+                expires_at=expires_at,
+            )
+            email_sent = True
+        except Exception as exc:
+            logger.warning(
+                "invite.email_dispatch_failed",
+                extra={"invite_id": str(invite.id), "error": str(exc)},
+            )
+
+    audit.record(
+        session=session,
+        firm_id=admin.firm_id,
+        actor_user_id=admin.id,
+        action="invite.resent",
+        entity_type="user_invite",
+        entity_id=invite.id,
+        metadata={"email": str(invite.email), "email_sent": email_sent},
+    )
+    return InviteCreateResponse(
+        invite_id=invite.id, invite_token=raw, expires_at=expires_at
+    )
+
+
 @router.delete("/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_invite(
     invite_id: uuid.UUID,

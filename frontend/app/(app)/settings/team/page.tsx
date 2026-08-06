@@ -86,6 +86,25 @@ export default function TeamPage() {
     }
   }
 
+  async function onResend(row: InviteRow) {
+    setMessage(null);
+    try {
+      const fresh = await api<InviteCreated>(`/invites/${row.id}/resend`, {
+        method: "POST",
+      });
+      setJustCreated(fresh);
+      setCopied(false);
+      setMessage({
+        kind: "ok",
+        text: `Resent invite to ${row.email}. Old link no longer works.`,
+      });
+      refresh();
+    } catch (err) {
+      const text = err instanceof ApiError ? err.message : String(err);
+      setMessage({ kind: "error", text: `Resend failed — ${text}` });
+    }
+  }
+
   async function copyLink() {
     if (!justCreated) return;
     try {
@@ -149,20 +168,38 @@ export default function TeamPage() {
       {
         key: "actions",
         header: "",
-        cell: (r) =>
-          statusOf(r) === "pending" ? (
-            <button
-              type="button"
-              onClick={() => onRevoke(r)}
-              className={btnDangerCls}
-              data-testid={`revoke-${r.email}`}
-            >
-              Revoke
-            </button>
-          ) : (
-            <span className="text-ink-muted text-xs">—</span>
-          ),
-        width: "6rem",
+        cell: (r) => {
+          const s = statusOf(r);
+          if (s === "accepted") {
+            return <span className="text-ink-muted text-xs">—</span>;
+          }
+          // Both pending and expired invites can be resent (resend
+          // rotates the token, so an expired invite is effectively
+          // revived with a fresh link).
+          return (
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => onResend(r)}
+                className="text-xs text-accent hover:text-accent-hover hover:underline"
+                data-testid={`resend-${r.email}`}
+              >
+                Resend
+              </button>
+              {s === "pending" && (
+                <button
+                  type="button"
+                  onClick={() => onRevoke(r)}
+                  className={btnDangerCls}
+                  data-testid={`revoke-${r.email}`}
+                >
+                  Revoke
+                </button>
+              )}
+            </div>
+          );
+        },
+        width: "10rem",
       },
     ],
     [],
