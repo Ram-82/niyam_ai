@@ -25,6 +25,7 @@ from app.api.gsp import router as gsp_router
 from app.api.imports import router as imports_router
 from app.api.invites import router as invites_router
 from app.api.narrator import router as narrator_router
+from app.api.reminders import router as reminders_router
 from app.api.supplier_contacts import router as supplier_contacts_router
 from app.api.whatsapp import router as whatsapp_router
 from app.api.workspace import router as workspace_router
@@ -90,6 +91,7 @@ app.include_router(whatsapp_router)
 app.include_router(supplier_contacts_router)
 app.include_router(filings_router)
 app.include_router(audit_router)
+app.include_router(reminders_router)
 
 
 @app.get("/health")

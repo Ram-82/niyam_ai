@@ -22,6 +22,7 @@ from app.email.transport import (
 )
 from app.email.factory import get_transport, reset_transport_for_tests
 from app.email.service import (
+    send_due_date_reminder_email,
     send_invite_email,
     send_password_reset_email,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "NoopTransport",
     "get_transport",
     "reset_transport_for_tests",
+    "send_due_date_reminder_email",
     "send_invite_email",
     "send_password_reset_email",
 ]

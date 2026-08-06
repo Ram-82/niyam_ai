@@ -118,5 +118,12 @@ class Settings(BaseSettings):
     # this is the CA-facing dashboard URL (e.g. https://app.niyam.ai).
     email_app_base_url: str = "http://localhost:3000"
 
+    # Due-date reminder sweep. Fires when the /scheduler/reminders/sweep
+    # cron endpoint runs. Independent of email_enabled — even with the
+    # cron wired, the sweep is a no-op until this flips true. Reason:
+    # sweeps are heavy (whole-firm fanout) and pre-launch dry-runs would
+    # spam every staff account.
+    reminders_enabled: bool = False
+
 
 settings = Settings()

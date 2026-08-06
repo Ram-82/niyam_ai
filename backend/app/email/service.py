@@ -6,7 +6,7 @@ never touch the transport directly.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from app.config import settings
 from app.email.factory import get_transport
@@ -47,6 +47,60 @@ def send_invite_email(
         f"\n"
         f"If you weren't expecting this, ignore this email — the link\n"
         f"expires on its own.\n"
+    )
+    msg = EmailMessage(
+        to=to,
+        subject=subject,
+        body_text=body,
+        from_addr=settings.email_from,
+        from_name=settings.email_from_name,
+    )
+    get_transport().send(msg)
+    return msg
+
+
+def send_due_date_reminder_email(
+    *,
+    to: str,
+    gstin: str,
+    client_trade_name: str,
+    return_type: str,
+    period: str,
+    due_date: date,
+    days_before_due: int,
+) -> EmailMessage:
+    """Nudge email — one per (gid, period, return_type, days_before, recipient).
+
+    Idempotency is the ``reminder_log`` UNIQUE constraint's job; this
+    function only formats and dispatches.
+    """
+    if days_before_due > 1:
+        when = f"in {days_before_due} days"
+    elif days_before_due == 1:
+        when = "tomorrow"
+    elif days_before_due == 0:
+        when = "today"
+    else:
+        when = f"{-days_before_due} day(s) OVERDUE"
+
+    subject = (
+        f"[{return_type}] {gstin} — {client_trade_name} — due {when} "
+        f"({due_date.isoformat()})"
+    )
+    url = _build_url(f"/command-center?gstin={gstin}&period={period}")
+    body = (
+        f"{return_type} for {client_trade_name} ({gstin}) is due {when}.\n"
+        f"\n"
+        f"  Period:    {period}\n"
+        f"  Due date:  {due_date.isoformat()}\n"
+        f"  Return:    {return_type}\n"
+        f"\n"
+        f"Open in Command Center:\n"
+        f"\n"
+        f"  {url}\n"
+        f"\n"
+        f"You're getting this because you're assigned to this client on\n"
+        f"Niyam AI. Reminders stop once the return is marked filed.\n"
     )
     msg = EmailMessage(
         to=to,

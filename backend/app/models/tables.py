@@ -851,6 +851,51 @@ class SupplierContact(Base):
     )
 
 
+class ReminderLog(Base):
+    """One row per emitted due-date reminder.
+
+    The (gstin_profile_id, period, return_type, days_before_due,
+    channel, recipient_user_id) UNIQUE constraint is the idempotency
+    guarantee — the sweep issues INSERT ... ON CONFLICT DO NOTHING
+    and only dispatches the email when rowcount == 1.
+    """
+
+    __tablename__ = "reminder_log"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    firm_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ca_firm.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    gstin_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("gstin_profile.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    period: Mapped[str] = mapped_column(Text, nullable=False)
+    return_type: Mapped[str] = mapped_column(ReturnTypeEnum, nullable=False)
+    days_before_due: Mapped[int] = mapped_column(Integer, nullable=False)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    recipient_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    recipient_email: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = _created_at()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "gstin_profile_id", "period", "return_type",
+            "days_before_due", "channel", "recipient_user_id",
+            name="reminder_log_idempotency",
+        ),
+    )
+
+
 class FilingRun(Base):
     """GSTR-1 / GSTR-3B draft payload for (gstin, period, return_type).
 
