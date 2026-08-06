@@ -47,6 +47,16 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(title="Niyam AI Backend", lifespan=_lifespan)
 
+# Observability — JSON logs + X-Request-Id middleware. Install BEFORE
+# CORS so the request-id contextvar is set for every log line, including
+# CORS preflight rejections.
+from app.observability import install as _install_observability
+_install_observability(app)
+
+# Expose the request-id header so browsers can read it back for bug
+# reports. Extended below with Retry-After.
+_EXPOSE_HEADERS = ["Retry-After", "X-Request-Id"]
+
 # CORS — the dashboard runs on a separate origin from the API in dev
 # (localhost:3000 vs localhost:8000). Without this middleware the
 # browser fetch is preflighted, rejected, and the login form silently
@@ -62,7 +72,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Retry-After"],
+    expose_headers=_EXPOSE_HEADERS,
 )
 
 app.include_router(auth_router)
