@@ -28,6 +28,75 @@ class UnknownReturnType(Exception):
     pass
 
 
+class FilingNotFound(Exception):
+    pass
+
+
+class InvalidTransition(Exception):
+    """Raised for any state-machine violation on approve/unlock/mark-filed."""
+
+
+# Every transition goes through _transition. Encoded as an explicit
+# whitelist so a future refactor cannot silently unlock a filed row.
+_ALLOWED_TRANSITIONS: dict[tuple[str, str], str] = {
+    ("draft",    "approved"): "filing.approved",
+    ("approved", "draft"):    "filing.unlocked",
+    ("approved", "filed"):    "filing.filed",
+}
+
+
+def _transition(
+    session: Session,
+    firm_id: uuid.UUID,
+    filing_id: uuid.UUID,
+    to_status: str,
+    user_id: uuid.UUID | None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    row = session.execute(
+        text("SELECT id, status FROM filing_run WHERE id = :id"),
+        {"id": str(filing_id)},
+    ).first()
+    if row is None:
+        raise FilingNotFound(str(filing_id))
+    key = (row.status, to_status)
+    if key not in _ALLOWED_TRANSITIONS:
+        raise InvalidTransition(
+            f"cannot move filing {filing_id} from {row.status} to {to_status}"
+        )
+    session.execute(
+        text(
+            "UPDATE filing_run SET status = :s, updated_at = now() "
+            "WHERE id = :id"
+        ),
+        {"s": to_status, "id": str(filing_id)},
+    )
+    audit.record(
+        session=session,
+        firm_id=firm_id,
+        actor_user_id=user_id,
+        action=_ALLOWED_TRANSITIONS[key],
+        entity_type="filing_run",
+        entity_id=filing_id,
+        metadata={"from": row.status, "to": to_status, **(metadata or {})},
+    )
+    session.flush()
+    return _fetch(session, filing_id)
+
+
+def approve(session, firm_id, filing_id, user_id):
+    return _transition(session, firm_id, filing_id, "approved", user_id)
+
+
+def unlock(session, firm_id, filing_id, user_id):
+    return _transition(session, firm_id, filing_id, "draft", user_id)
+
+
+def mark_filed(session, firm_id, filing_id, user_id, arn: str | None):
+    meta = {"arn": arn, "filed_at": datetime.now(timezone.utc).isoformat()}
+    return _transition(session, firm_id, filing_id, "filed", user_id, meta)
+
+
 def generate_filing(
     session: Session,
     firm_id: uuid.UUID,

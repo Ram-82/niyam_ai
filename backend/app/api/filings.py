@@ -19,8 +19,13 @@ from sqlalchemy import text
 from app.api.deps import get_current_user, get_firm_scoped_session
 from app.filings.service import (
     FilingLocked,
+    FilingNotFound,
+    InvalidTransition,
     UnknownReturnType,
+    approve as svc_approve,
     generate_filing,
+    mark_filed as svc_mark_filed,
+    unlock as svc_unlock,
 )
 from app.models.tables import AppUser
 
@@ -90,6 +95,55 @@ def get_one(
     if not row:
         raise HTTPException(status_code=404, detail="filing_not_found")
     return FilingRow(**dict(row))
+
+
+class MarkFiledReq(BaseModel):
+    arn: Optional[str] = Field(default=None, max_length=64)
+
+
+def _run_transition(fn, session, user, filing_id, **kwargs):
+    try:
+        return fn(
+            session=session,
+            firm_id=user.firm_id,
+            filing_id=filing_id,
+            user_id=user.id,
+            **kwargs,
+        )
+    except FilingNotFound:
+        raise HTTPException(status_code=404, detail="filing_not_found")
+    except InvalidTransition as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/filings/{filing_id}/approve", response_model=FilingRow)
+def post_approve(
+    filing_id: uuid.UUID,
+    user: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> FilingRow:
+    return FilingRow(**_run_transition(svc_approve, session, user, filing_id))
+
+
+@router.post("/filings/{filing_id}/unlock", response_model=FilingRow)
+def post_unlock(
+    filing_id: uuid.UUID,
+    user: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> FilingRow:
+    return FilingRow(**_run_transition(svc_unlock, session, user, filing_id))
+
+
+@router.post("/filings/{filing_id}/mark-filed", response_model=FilingRow)
+def post_mark_filed(
+    filing_id: uuid.UUID,
+    body: MarkFiledReq,
+    user: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> FilingRow:
+    return FilingRow(
+        **_run_transition(svc_mark_filed, session, user, filing_id, arn=body.arn)
+    )
 
 
 @router.get("/gstins/{gstin_profile_id}/filings", response_model=list[FilingRow])
