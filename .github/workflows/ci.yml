@@ -42,6 +42,16 @@ jobs:
       - name: Alembic upgrade head
         run: docker compose run --rm -T backend alembic upgrade head
 
+      - name: Alembic downgrade smoke (roundtrip -1 then re-upgrade)
+        # Catches migrations whose downgrade() is broken. Cheap; runs
+        # against the fresh test DB before pytest touches it. Must land
+        # on head at the end so pytest sees the current schema.
+        run: |
+          docker compose run --rm -T backend sh -c '
+            alembic downgrade -1 &&
+            alembic upgrade head
+          '
+
       - name: Run pytest (dev extras installed inline; --rm discards the
               container layer so they must be installed in the same shell)
         run: |

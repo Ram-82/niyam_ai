@@ -1,16 +1,26 @@
+# Every value that a real deployment would rotate is env-parameterised
+# with a dev default (``${VAR:-value}``). Docker Compose reads the
+# process environment plus a .env file next to this file if present; a
+# secrets manager can render that .env at deploy time. Nothing in this
+# file needs editing to swap credentials.
+#
+# See .env.example for the canonical list of variables the app reads.
+
 services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_DB: niyam
-      POSTGRES_USER: niyam
-      POSTGRES_PASSWORD: niyam
+      POSTGRES_DB: ${POSTGRES_DB:-niyam}
+      POSTGRES_USER: ${POSTGRES_USER:-niyam}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-niyam}
     ports:
       - "5432:5432"
     volumes:
       - niyam_pg:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U niyam -d niyam"]
+      test:
+        - "CMD-SHELL"
+        - "pg_isready -U ${POSTGRES_USER:-niyam} -d ${POSTGRES_DB:-niyam}"
       interval: 5s
       timeout: 3s
       retries: 20
@@ -35,12 +45,13 @@ services:
       - ./backend:/app
       - niyam_uploads:/data/uploads
     environment:
-      DATABASE_URL: postgresql+psycopg://niyam:niyam@postgres:5432/niyam
-      APP_DATABASE_URL: postgresql+psycopg://niyam:niyam@postgres:5432/niyam
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://niyam:niyam@postgres:5432/niyam}
+      APP_DATABASE_URL: ${APP_DATABASE_URL:-postgresql+psycopg://niyam:niyam@postgres:5432/niyam}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-change-in-prod}
       UPLOAD_DIR: /data/uploads
-      GSP_MODE: mock
-      GSP_BASE_URL: http://gsp-mock:9000
+      GSP_MODE: ${GSP_MODE:-mock}
+      GSP_BASE_URL: ${GSP_BASE_URL:-http://gsp-mock:9000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,12 +69,13 @@ services:
       - ./backend:/app
       - niyam_uploads:/data/uploads
     environment:
-      DATABASE_URL: postgresql+psycopg://niyam:niyam@postgres:5432/niyam
-      APP_DATABASE_URL: postgresql+psycopg://niyam:niyam@postgres:5432/niyam
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://niyam:niyam@postgres:5432/niyam}
+      APP_DATABASE_URL: ${APP_DATABASE_URL:-postgresql+psycopg://niyam:niyam@postgres:5432/niyam}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-change-in-prod}
       UPLOAD_DIR: /data/uploads
-      GSP_MODE: mock
-      GSP_BASE_URL: http://gsp-mock:9000
+      GSP_MODE: ${GSP_MODE:-mock}
+      GSP_BASE_URL: ${GSP_BASE_URL:-http://gsp-mock:9000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,19 +92,20 @@ services:
       - ./backend:/app
       - niyam_uploads:/data/uploads
     environment:
-      DATABASE_URL: postgresql+psycopg://niyam:niyam@postgres:5432/niyam
-      APP_DATABASE_URL: postgresql+psycopg://niyam:niyam@postgres:5432/niyam
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://niyam:niyam@postgres:5432/niyam}
+      APP_DATABASE_URL: ${APP_DATABASE_URL:-postgresql+psycopg://niyam:niyam@postgres:5432/niyam}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-change-in-prod}
       UPLOAD_DIR: /data/uploads
-      GSP_MODE: mock
-      GSP_BASE_URL: http://gsp-mock:9000
+      GSP_MODE: ${GSP_MODE:-mock}
+      GSP_BASE_URL: ${GSP_BASE_URL:-http://gsp-mock:9000}
       # Enable the P2 modules for dev + e2e. Both use mock transports
       # (deterministic template narration, in-memory wamid.mock ids)
       # so no external calls fire.
-      NARRATOR_ENABLED: "1"
-      NARRATOR_MODE: mock
-      WHATSAPP_ENABLED: "1"
-      WHATSAPP_MODE: mock
+      NARRATOR_ENABLED: ${NARRATOR_ENABLED:-1}
+      NARRATOR_MODE: ${NARRATOR_MODE:-mock}
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-1}
+      WHATSAPP_MODE: ${WHATSAPP_MODE:-mock}
     ports:
       - "8000:8000"
     depends_on:
@@ -127,7 +140,7 @@ services:
       - ./frontend:/app
       - niyam_node_modules:/app/node_modules
     environment:
-      NIYAM_API_BASE: http://localhost:8000
+      NIYAM_API_BASE: ${NIYAM_API_BASE:-http://localhost:8000}
     ports:
       - "3000:3000"
     depends_on:
