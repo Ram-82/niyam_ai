@@ -193,6 +193,27 @@ export interface InviteCreated {
   expires_at: string;
 }
 
+export interface CalendarRow {
+  gstin_profile_id: string;
+  gstin: string;
+  client_id: string;
+  client_trade_name: string;
+  scheme: string;
+  return_type: "GSTR1" | "GSTR3B";
+  period: string;
+  due_date: string; // ISO YYYY-MM-DD
+  days_out: number; // negative = overdue
+  filing_status: "draft" | "approved" | "filed" | null;
+  reminders_sent: number;
+}
+
+export interface CalendarResponse {
+  today: string;
+  horizon_days: number;
+  lookback_days: number;
+  rows: CalendarRow[];
+}
+
 export interface Me {
   id: string;
   email: string;

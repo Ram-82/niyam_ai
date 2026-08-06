@@ -59,6 +59,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </Link>
           <nav className="flex gap-6 text-sm h-full items-stretch">
             <NavLink href="/command-center" pathname={pathname}>Command center</NavLink>
+            <NavLink href="/calendar" pathname={pathname}>Calendar</NavLink>
             <NavLink href="/imports" pathname={pathname}>Imports</NavLink>
             <NavLink href="/settings" pathname={pathname}>Settings</NavLink>
             <NavLink href="/settings/activity" pathname={pathname}>Activity</NavLink>
