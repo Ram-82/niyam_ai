@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api.admin import router as admin_router
+from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
 from app.api.clients import router as clients_router
 from app.api.command_center import router as command_center_router
@@ -76,6 +77,7 @@ app.include_router(narrator_router)
 app.include_router(whatsapp_router)
 app.include_router(supplier_contacts_router)
 app.include_router(filings_router)
+app.include_router(audit_router)
 
 
 @app.get("/health")

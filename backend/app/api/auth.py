@@ -120,6 +120,16 @@ def register(payload: RegisterRequest) -> RegisterResponse:
         raise HTTPException(status_code=400, detail=str(e))
     except service.InvalidInviteError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    with firm_scoped_session(user.firm_id) as session:
+        audit.record(
+            session=session,
+            firm_id=user.firm_id,
+            actor_user_id=user.id,
+            action="auth.user_registered",
+            entity_type="app_user",
+            entity_id=user.id,
+            metadata={"role": user.role, "via": "invite"},
+        )
     return RegisterResponse(user_id=user.id, firm_id=user.firm_id)
 
 
@@ -179,6 +189,16 @@ def login(payload: LoginRequest, response: Response):
 
     lockout.clear(email)
     service.touch_last_login(user.id, user.firm_id)
+    with firm_scoped_session(user.firm_id) as session:
+        audit.record(
+            session=session,
+            firm_id=user.firm_id,
+            actor_user_id=user.id,
+            action="auth.login",
+            entity_type="app_user",
+            entity_id=user.id,
+            metadata={"totp": True},
+        )
     return _issue_token_pair(user)
 
 
@@ -236,6 +256,16 @@ def totp_verify(
     revocation.revoke(claims.jti, remaining)
 
     service.touch_last_login(user.id, user.firm_id)
+    with firm_scoped_session(user.firm_id) as session:
+        audit.record(
+            session=session,
+            firm_id=user.firm_id,
+            actor_user_id=user.id,
+            action="auth.totp_confirmed",
+            entity_type="app_user",
+            entity_id=user.id,
+            metadata={},
+        )
     return _issue_token_pair(user)
 
 

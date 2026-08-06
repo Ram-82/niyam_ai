@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 
 from app.api.deps import get_current_user, get_firm_scoped_session
+from app.auth import audit
 from app.config import settings
 from app.db import firm_scoped_session
 from app.ingestion.errors import rejects_to_csv
@@ -128,6 +129,19 @@ def upload_invoices(
         )
         session.add(job)
         session.flush()
+        audit.record(
+            session=session,
+            firm_id=user.firm_id,
+            actor_user_id=user.id,
+            action="import.enqueued",
+            entity_type="import_job",
+            entity_id=job.id,
+            metadata={
+                "kind": kind,
+                "filename": job.filename,
+                "gstin_profile_id": str(gstin_profile_id),
+            },
+        )
         # Materialize before session close
         _ = (job.id, job.kind, job.status, job.summary, job.gstin_profile_id,
              job.period, job.total_rows, job.accepted_rows,
@@ -182,6 +196,20 @@ def upload_gstr2b(
         )
         session.add(job)
         session.flush()
+        audit.record(
+            session=session,
+            firm_id=user.firm_id,
+            actor_user_id=user.id,
+            action="import.enqueued",
+            entity_type="import_job",
+            entity_id=job.id,
+            metadata={
+                "kind": "gstr2b_json",
+                "period": period,
+                "filename": job.filename,
+                "gstin_profile_id": str(gstin_profile_id),
+            },
+        )
         _ = (job.id, job.kind, job.status, job.summary, job.gstin_profile_id,
              job.period, job.total_rows, job.accepted_rows,
              job.rejected_rows, job.duplicate_rows, job.error_message)

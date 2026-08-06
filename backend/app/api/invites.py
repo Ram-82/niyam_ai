@@ -16,6 +16,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import delete, select, update
 
 from app.api.deps import get_firm_scoped_session, require_admin
+from app.auth import audit
 from app.auth.service import hash_invite_token
 from app.models.tables import UserInvite, AppUser
 
@@ -68,6 +69,15 @@ def create_invite(
     )
     session.add(invite)
     session.flush()
+    audit.record(
+        session=session,
+        firm_id=admin.firm_id,
+        actor_user_id=admin.id,
+        action="invite.created",
+        entity_type="user_invite",
+        entity_id=invite.id,
+        metadata={"email": payload.email, "role": payload.role},
+    )
     return InviteCreateResponse(
         invite_id=invite.id, invite_token=raw, expires_at=expires_at
     )
@@ -95,7 +105,7 @@ def list_invites(
 @router.delete("/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_invite(
     invite_id: uuid.UUID,
-    _: AppUser = Depends(require_admin),
+    admin: AppUser = Depends(require_admin),
     session=Depends(get_firm_scoped_session),
 ) -> None:
     # Soft-delete by expiring in place. Keeps the row for audit but makes
@@ -108,4 +118,13 @@ def revoke_invite(
     )
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="invite not found")
+    audit.record(
+        session=session,
+        firm_id=admin.firm_id,
+        actor_user_id=admin.id,
+        action="invite.revoked",
+        entity_type="user_invite",
+        entity_id=invite_id,
+        metadata={},
+    )
     return None

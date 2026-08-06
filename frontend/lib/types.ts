@@ -384,3 +384,21 @@ export interface FilingRow {
   updated_at: string;
   payload: Record<string, unknown> | null;
 }
+
+
+// ---------------------------------------------------------------------------
+// Audit log (firm activity feed)
+// ---------------------------------------------------------------------------
+
+
+export interface AuditRow {
+  id: string;
+  firm_id: string;
+  user_id: string | null;
+  user_email: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  diff: Record<string, unknown>;
+  at: string;
+}

@@ -14,6 +14,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth import audit
 from app.filings.gstr1_generator import generate_gstr1
 from app.filings.gstr3b_generator import generate_gstr3b
 from app.rules.default_pack import VERSION as RULE_PACK_VERSION
@@ -84,6 +85,7 @@ def generate_filing(
             },
         )
         filing_id = existing.id
+        _audit_action = "filing.regenerated"
     else:
         row = session.execute(
             text(
@@ -109,6 +111,22 @@ def generate_filing(
             },
         ).one()
         filing_id = row.id
+        _audit_action = "filing.generated"
+
+    audit.record(
+        session=session,
+        firm_id=firm_id,
+        actor_user_id=user_id,
+        action=_audit_action,
+        entity_type="filing_run",
+        entity_id=filing_id,
+        metadata={
+            "return_type": return_type,
+            "period": period,
+            "rule_pack_version": RULE_PACK_VERSION,
+            "sections_covered": payload.get("_meta", {}).get("sections_covered", []),
+        },
+    )
 
     # NB: do not commit here. The dependency that opened this session
     # (get_firm_scoped_session) commits on happy exit; if we commit

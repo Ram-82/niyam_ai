@@ -61,6 +61,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <NavLink href="/command-center" pathname={pathname}>Command center</NavLink>
             <NavLink href="/imports" pathname={pathname}>Imports</NavLink>
             <NavLink href="/settings" pathname={pathname}>Settings</NavLink>
+            <NavLink href="/settings/activity" pathname={pathname}>Activity</NavLink>
           </nav>
           <div className="ml-auto flex items-center gap-4 text-xs text-ink-muted">
             {me && (
