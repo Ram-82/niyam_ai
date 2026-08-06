@@ -105,8 +105,11 @@ jobs:
       - name: Build backend + gsp-mock images
         run: docker compose build backend api gsp-mock worker
 
-      - name: Start postgres + redis + api + gsp-mock
-        run: docker compose up -d postgres redis api gsp-mock
+      - name: Start postgres + redis
+        # Migrations (which create the niyam_app role) MUST land before
+        # api starts — the api's connection pool does SET ROLE at connect
+        # time and crashes the container if the role doesn't exist.
+        run: docker compose up -d postgres redis
 
       - name: Wait for postgres
         run: |
@@ -120,6 +123,9 @@ jobs:
 
       - name: Alembic upgrade head
         run: docker compose run --rm -T backend alembic upgrade head
+
+      - name: Start api + gsp-mock (now that niyam_app exists)
+        run: docker compose up -d api gsp-mock
 
       - name: Wait for api
         run: |
