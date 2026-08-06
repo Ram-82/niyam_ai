@@ -1,0 +1,102 @@
+# Production image for the Niyam backend.
+#
+# Two stages: builder installs deps into a venv against pyproject.toml,
+# runtime copies just the venv + the app source. No dev extras, no bind
+# mount surface, no --reload — every restart pulls a fresh image.
+#
+# Runs under an unprivileged user; the app never needs root at runtime.
+# CMD invokes gunicorn with uvicorn workers so we get the async event
+# loop of uvicorn plus gunicorn's mature process lifecycle (SIGTERM,
+# worker recycling, worker timeouts).
+#
+# WEB_WORKERS defaults to 4 — tune per-pod based on (2 * cpu) + 1.
+# Set NIYAM_LOG_LEVEL=INFO in prod; the JSON formatter is installed at
+# app import time so gunicorn's stderr comes out structured too.
+
+# ---------- Stage 1: builder ---------------------------------------------------
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
+# Build deps for wheels that don't ship prebuilt (bcrypt, psycopg edges,
+# cryptography). Removed in the runtime stage so the final image is lean.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Isolated venv so we can copy /opt/venv verbatim into runtime.
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
+WORKDIR /build
+COPY pyproject.toml ./
+# Copy the source so `pip install -e` finds the package layout. In the
+# runtime stage we mount the source separately — this install is only
+# to resolve the dependency graph into /opt/venv.
+COPY app ./app
+RUN pip install --no-cache-dir .
+
+# ---------- Stage 2: runtime ---------------------------------------------------
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:${PATH}" \
+    WEB_WORKERS=4 \
+    NIYAM_LOG_LEVEL=INFO
+
+# Runtime-only libs: libpq for psycopg + cairo/pango for WeasyPrint PDF
+# rendering + fonts for the 2-pager vernacular templates. No compiler.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq5 \
+        libcairo2 \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
+        shared-mime-info \
+        fonts-noto-core \
+        fonts-indic \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user. UID 10001 is a conventional "unprivileged app" id that
+# avoids collision with distro users (which sit under 1000).
+RUN groupadd -g 10001 niyam && useradd -u 10001 -g niyam -m -s /bin/bash niyam
+
+COPY --from=builder /opt/venv /opt/venv
+
+WORKDIR /app
+COPY app ./app
+COPY alembic.ini ./
+COPY alembic ./alembic
+
+# Uploads live on a mounted volume in prod; declare so orchestrators can
+# wire a PVC without editing this Dockerfile.
+RUN mkdir -p /data/uploads && chown -R niyam:niyam /data /app
+VOLUME /data/uploads
+
+USER niyam
+
+EXPOSE 8000
+
+# k8s-shaped liveness probe. Readiness (/readyz) also exists but touches
+# the DB + Redis, which isn't appropriate for a container-level check.
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
+    CMD curl -fsS http://localhost:8000/livez || exit 1
+
+# Gunicorn + uvicorn workers. --forwarded-allow-ips=* trusts X-Forwarded-*
+# from any peer — this container is expected to sit behind a TLS-terminating
+# ingress; if the ingress isn't setting those headers, remove this flag.
+CMD ["sh", "-c", "gunicorn app.main:app \
+    --workers ${WEB_WORKERS} \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 0.0.0.0:8000 \
+    --timeout 60 \
+    --graceful-timeout 30 \
+    --access-logfile - \
+    --error-logfile - \
+    --forwarded-allow-ips=*"]

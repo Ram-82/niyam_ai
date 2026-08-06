@@ -5,12 +5,14 @@ raise loudly rather than let requests fail with obscure connection errors.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from sqlalchemy import text
 
 from app.api.admin import router as admin_router
@@ -92,6 +94,51 @@ app.include_router(audit_router)
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    # rule_pack_version is filled in by Step 6 seeding. Until then we return
-    # the placeholder so smoke tests don't crash on the field being missing.
+    # Back-compat alias — /livez is the k8s-shaped probe, but this one
+    # is embedded in Docker compose healthchecks and the frontend smoke.
     return {"status": "ok", "rule_pack_version": "unseeded"}
+
+
+@app.get("/livez")
+def livez() -> dict[str, str]:
+    """Kubernetes liveness probe. Always 200 unless the process is
+    unresponsive. Does NOT touch Postgres or Redis — a liveness probe
+    that queries the DB will loop the pod on a transient DB outage."""
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+def readyz() -> Response:
+    """Kubernetes readiness probe. 200 only when Postgres and Redis
+    are both reachable — a pod that can't reach either can't serve
+    traffic, so k8s should stop routing to it until it recovers.
+
+    Uses the app-role engine so the check exercises the same
+    connection path the request handlers use, not the owner engine.
+    """
+    from sqlalchemy import text as _t
+    from app.db import app_engine
+    from app.auth.revocation import _redis as _rev_redis
+
+    checks: dict[str, str] = {}
+
+    try:
+        with app_engine.connect() as conn:
+            conn.execute(_t("SELECT 1"))
+        checks["postgres"] = "ok"
+    except Exception as e:  # noqa: BLE001 — probe reports any failure
+        checks["postgres"] = f"error: {e.__class__.__name__}"
+
+    try:
+        _rev_redis.ping()
+        checks["redis"] = "ok"
+    except Exception as e:  # noqa: BLE001
+        checks["redis"] = f"error: {e.__class__.__name__}"
+
+    healthy = all(v == "ok" for v in checks.values())
+    body = json.dumps({"status": "ok" if healthy else "degraded", **checks})
+    return Response(
+        content=body,
+        media_type="application/json",
+        status_code=200 if healthy else 503,
+    )
