@@ -73,6 +73,13 @@ class CAFirm(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     name: Mapped[str] = mapped_column(Text, nullable=False)
     plan: Mapped[str] = mapped_column(Text, nullable=False, server_default="pilot")
+    # Per-firm opt-out for the due-date reminder sweep. Only meaningful
+    # when the global settings.reminders_enabled is also true. Default
+    # TRUE (opt-out) so a firm gets nudges unless they explicitly say
+    # not to.
+    reminders_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
     created_at: Mapped[datetime] = _created_at()
 
 

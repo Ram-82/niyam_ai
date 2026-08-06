@@ -6,7 +6,7 @@ import { DataTable, type Column } from "@/components/Table";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonTable } from "@/components/Skeleton";
 import { PageHeader } from "@/components/PageHeader";
-import type { Client, User } from "@/lib/types";
+import type { Client, FirmSettings, User } from "@/lib/types";
 
 
 const inputCls =
@@ -222,6 +222,8 @@ export default function SettingsPage() {
         )}
       </section>
 
+      <FirmPreferencesCard />
+
       <ChangePasswordCard />
 
       <section className="space-y-2">
@@ -241,6 +243,88 @@ export default function SettingsPage() {
         </div>
       </section>
     </>
+  );
+}
+
+
+function FirmPreferencesCard() {
+  const [settings, setSettings] = useState<FirmSettings | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    api<FirmSettings>("/firm/settings")
+      .then(setSettings)
+      .catch((e) => setMsg({ kind: "error", text: `Load failed — ${String(e)}` }));
+  }, []);
+
+  async function toggleReminders(next: boolean) {
+    setSaving(true);
+    setMsg(null);
+    try {
+      const updated = await api<FirmSettings>("/firm/settings", {
+        method: "PATCH",
+        body: { reminders_enabled: next },
+      });
+      setSettings(updated);
+      setMsg({
+        kind: "ok",
+        text: next
+          ? "Reminder emails re-enabled for this firm."
+          : "Reminder emails silenced for this firm.",
+      });
+    } catch (e) {
+      const text = e instanceof ApiError ? e.message : String(e);
+      setMsg({ kind: "error", text: `Save failed — ${text}` });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold text-ink">Firm preferences</h2>
+      <div className="bg-paper-raised border border-rule rounded-md p-6 max-w-[720px] space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-ink">
+              Due-date reminder emails
+            </div>
+            <p className="text-xs text-ink-muted mt-1">
+              When on, the reminder sweep (7 / 3 / 1 / 0 days before due)
+              emails firm admins and staff assigned to each client. Turn
+              off if your firm handles reminders another way.
+            </p>
+          </div>
+          <label className="inline-flex items-center gap-2 shrink-0">
+            <input
+              type="checkbox"
+              disabled={settings === null || saving}
+              checked={settings?.reminders_enabled ?? false}
+              onChange={(e) => toggleReminders(e.target.checked)}
+              className="h-4 w-4"
+              data-testid="firm-reminders-toggle"
+            />
+            <span className="text-sm text-ink">
+              {settings?.reminders_enabled ? "On" : "Off"}
+            </span>
+          </label>
+        </div>
+        {msg && (
+          <p
+            className={
+              "text-sm border rounded-sm px-3 py-2 " +
+              (msg.kind === "ok"
+                ? "bg-green-bg text-green-fg border-rule"
+                : "bg-red-bg text-red-fg border-rule")
+            }
+            data-testid="firm-prefs-message"
+          >
+            {msg.text}
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 

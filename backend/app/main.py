@@ -22,6 +22,7 @@ from app.api.calendar import router as calendar_router
 from app.api.clients import router as clients_router
 from app.api.command_center import router as command_center_router
 from app.api.filings import router as filings_router
+from app.api.firm import router as firm_router
 from app.api.gsp import router as gsp_router
 from app.api.imports import router as imports_router
 from app.api.invites import router as invites_router
@@ -94,6 +95,7 @@ app.include_router(filings_router)
 app.include_router(audit_router)
 app.include_router(reminders_router)
 app.include_router(calendar_router)
+app.include_router(firm_router)
 
 
 @app.get("/health")

@@ -93,8 +93,16 @@ def _candidate_periods(today: date) -> list[str]:
 
 
 def _load_firm_ids() -> list[str]:
+    """Firms that have opted IN to the reminder sweep.
+
+    A per-firm ``reminders_enabled`` flag (default true) lets an admin
+    silence the nudges for their firm without touching the global
+    settings.reminders_enabled kill switch.
+    """
     with owner_engine.begin() as conn:
-        rows = conn.execute(text("SELECT id FROM ca_firm")).fetchall()
+        rows = conn.execute(
+            text("SELECT id FROM ca_firm WHERE reminders_enabled = TRUE")
+        ).fetchall()
     return [str(r[0]) for r in rows]
 
 

@@ -214,6 +214,12 @@ export interface CalendarResponse {
   rows: CalendarRow[];
 }
 
+export interface FirmSettings {
+  name: string;
+  plan: string;
+  reminders_enabled: boolean;
+}
+
 export interface Me {
   id: string;
   email: string;
