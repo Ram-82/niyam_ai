@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { ConnectionsPanel } from "@/components/ConnectionsPanel";
 import { DeliveryPanel } from "@/components/DeliveryPanel";
 import { SupplierChasePanel } from "@/components/SupplierChasePanel";
+import { FilingsTab } from "@/components/FilingsTab";
 import { formatDateIN, formatPeriod, formatTimestampIN } from "@/lib/format-date";
 import { bucketTint } from "@/lib/design-tokens";
 import type {
@@ -27,7 +28,7 @@ import type {
 } from "@/lib/types";
 
 
-type Tab = "invoices" | "reconciliation" | "returns";
+type Tab = "invoices" | "reconciliation" | "returns" | "filings";
 type Bucket = "matched" | "probable" | "supplier_default" | "missing_entry";
 
 
@@ -62,7 +63,7 @@ export default function WorkspacePage() {
       <ConnectionsPanel gstinProfileId={gid} />
 
       <div className="flex gap-8 border-b border-rule -mx-6 px-6">
-        {(["invoices", "reconciliation", "returns"] as Tab[]).map((t) => (
+        {(["invoices", "reconciliation", "returns", "filings"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -83,6 +84,9 @@ export default function WorkspacePage() {
       {tab === "reconciliation" && <ReconciliationTab gid={gid} period={period} />}
       {tab === "returns" && (
         <ReturnsTab gid={gid} period={period} returnType={returnType} />
+      )}
+      {tab === "filings" && (
+        <FilingsTab gid={gid} period={period} returnType={returnType} />
       )}
     </>
   );

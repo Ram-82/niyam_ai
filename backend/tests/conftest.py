@@ -28,6 +28,7 @@ TRUNCATE_ORDER = (
     "delivery_attempt",
     "delivery_request",
     "supplier_contact",
+    "filing_run",
     "match_result",
     "reconciliation_run",
     "b2b_entry",

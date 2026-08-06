@@ -41,3 +41,6 @@ ImportKindEnum = _pg_enum(
 ImportStatusEnum = _pg_enum(
     "queued", "running", "completed", "failed", name="import_status"
 )
+FilingStatusEnum = _pg_enum(
+    "draft", "approved", "filed", name="filing_status"
+)

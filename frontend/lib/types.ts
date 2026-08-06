@@ -362,3 +362,25 @@ export interface ChasePreview {
   supplier_gstin: string;
   firm_name: string;
 }
+
+
+// ---------------------------------------------------------------------------
+// Filings (GSTR-1 / GSTR-3B draft JSON)
+// ---------------------------------------------------------------------------
+
+
+export type FilingStatus = "draft" | "approved" | "filed";
+
+
+export interface FilingRow {
+  id: string;
+  gstin_profile_id: string;
+  return_type: "GSTR1" | "GSTR3B";
+  period: string;
+  status: FilingStatus;
+  rule_pack_version: string;
+  generated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  payload: Record<string, unknown> | null;
+}

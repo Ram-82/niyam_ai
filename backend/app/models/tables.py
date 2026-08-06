@@ -37,6 +37,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import (
     B2BNoteTypeEnum,
     Base,
+    FilingStatusEnum,
     FlagSeverityEnum,
     GstSchemeEnum,
     ImportKindEnum,
@@ -810,4 +811,50 @@ class SupplierContact(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class FilingRun(Base):
+    """GSTR-1 / GSTR-3B draft payload for (gstin, period, return_type).
+
+    Unique on (gstin_profile_id, period, return_type) — regeneration
+    overwrites in place; a re-file after approval must reset status
+    back to 'draft' first.
+    """
+
+    __tablename__ = "filing_run"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    firm_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ca_firm.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    gstin_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("gstin_profile.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    return_type: Mapped[str] = mapped_column(ReturnTypeEnum, nullable=False)
+    period: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        FilingStatusEnum, nullable=False, server_default="draft"
+    )
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    rule_pack_version: Mapped[str] = mapped_column(Text, nullable=False)
+    generated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    __table_args__ = (
+        UniqueConstraint(
+            "gstin_profile_id", "period", "return_type",
+            name="filing_run_gid_period_return_uniq",
+        ),
     )
