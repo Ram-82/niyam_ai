@@ -435,7 +435,7 @@ def _seed_supplier_default_match(firm_id, gid) -> uuid.UUID:
                 "INSERT INTO reconciliation_run (id, firm_id, gstin_profile_id, "
                 "period, rule_pack_version, gstn_pull_id, summary, status) "
                 "VALUES (:id, :f, :g, '202606', '1.0.0', :pid, "
-                "CAST('{}' AS JSONB), 'succeeded')"
+                "CAST('{}' AS JSONB), 'completed')"
             ),
             {"id": run_id, "f": firm_id, "g": gid, "pid": pull_id},
         )

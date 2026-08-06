@@ -356,7 +356,7 @@ def _seed_supplier_chase_request(
                     gstn_pull_id, summary, status
                 ) VALUES (
                     :fid, :gid, '202607', '1.0.0', :pid,
-                    CAST('{}' AS JSONB), 'succeeded'
+                    CAST('{}' AS JSONB), 'completed'
                 )
                 RETURNING id
                 """

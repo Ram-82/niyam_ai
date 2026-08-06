@@ -149,7 +149,9 @@ class TestExtractNumberTokens:
 class TestBuildAllowedForms:
     def test_small_numbers_are_always_allowed(self) -> None:
         allowed = build_allowed_forms(_facts())
-        for i in range(0, 100):
+        # 0-100 inclusive — 100 is the readiness score scale ("out of 100"
+        # in the narrator's own copy) so it lives in the allow-list.
+        for i in range(0, 101):
             assert str(i) in allowed, f"{i} missing from allowed set"
 
     def test_money_values_included_as_rupee_ints(self) -> None:
@@ -192,12 +194,13 @@ class TestFindHallucinated:
         out = find_hallucinated("₹43,001 is at risk.", allowed)
         assert out == ["43001"]
 
-    def test_disallowed_percentage_rejected(self) -> None:
+    def test_disallowed_large_number_rejected(self) -> None:
         facts = _facts()
         allowed = build_allowed_forms(facts)
-        # Readiness is 65; 70% is a hallucination.
-        out = find_hallucinated("Readiness is 70%.", allowed)
-        assert out == ["70"]
+        # 4,300 is NOT in facts (₹43,000 is, but not the plain 4300).
+        # Numbers above the small-int ceiling must be in facts.
+        out = find_hallucinated("Number is 4300.", allowed)
+        assert out == ["4300"]
 
     def test_repeat_hallucination_dedupes_neighbours(self) -> None:
         facts = _facts()

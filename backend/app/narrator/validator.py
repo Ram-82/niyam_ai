@@ -48,10 +48,11 @@ _NUM_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
 
 # Numbers we always allow to appear even if not explicitly in the facts:
-# single-digit and two-digit small integers commonly used in prose
-# ("1 blocker", "6 suppliers", "20%"). Anything above this range must
-# be present in the facts to be permitted.
-_SMALL_NUMBER_CEILING = 99
+# 0-100 inclusive, so common prose like "1 blocker", "6 suppliers",
+# "20%", and — importantly — the "out of 100" score scale in the
+# narrator's own template are permitted without being explicit facts.
+# Anything above this range must be present in the facts to be permitted.
+_SMALL_NUMBER_CEILING = 100
 
 
 def _normalise(token: str) -> str:
@@ -105,9 +106,10 @@ def build_allowed_forms(facts: NarrationFacts) -> set[str]:
     """
     allowed: set[str] = set()
 
-    # Always-allowed small integers.
+    # Always-allowed small integers (0 through the ceiling, inclusive).
     for i in range(0, _SMALL_NUMBER_CEILING + 1):
         allowed.add(str(i))
+        allowed.add("-" + str(i))  # negative small forms ("-3 days past due")
 
     def _add_money(paise: int) -> None:
         # Raw paise (unlikely to appear in prose but harmless).

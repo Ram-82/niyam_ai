@@ -54,3 +54,6 @@ Thumbs.db
 niyam_pg/
 niyam_uploads/
 niyam_node_modules/
+
+# Claude Code runtime state (per-session locks, transcripts, etc.)
+.claude/

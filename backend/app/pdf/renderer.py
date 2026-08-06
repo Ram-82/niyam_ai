@@ -22,7 +22,10 @@ log = logging.getLogger("niyam.pdf.renderer")
 
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
-_STATIC_DIR = Path(__file__).parent / "static"
+# CSS lives alongside the templates so ``<link rel="stylesheet"
+# href="two_pager.css">`` resolves. The ``static/`` directory is
+# reserved for images/fonts that might land later.
+_STATIC_DIR = _TEMPLATE_DIR
 
 
 _env: Optional[jinja2.Environment] = None

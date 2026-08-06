@@ -504,7 +504,7 @@ def mark_near_miss_reviewed(
             "UPDATE match_result "
             "SET context = jsonb_set("
             "    context, '{near_miss_reviewed_at}', "
-            "    to_jsonb(:t::text), true"
+            "    to_jsonb(CAST(:t AS text)), true"
             ") "
             "WHERE id = :id"
         ),

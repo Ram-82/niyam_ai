@@ -79,7 +79,7 @@ def build_facts(
     client_row = session.execute(
         text(
             """
-            SELECT c.name, gp.gstin
+            SELECT c.trade_name, gp.gstin
             FROM gstin_profile gp
             JOIN client c ON c.id = gp.client_id
             WHERE gp.id = :gpid

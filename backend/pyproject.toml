@@ -39,6 +39,8 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "types-python-dateutil",
+    "pdfminer.six>=20240706",
+    "pytest-timeout>=2.3",
 ]
 
 [build-system]

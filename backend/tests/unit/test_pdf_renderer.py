@@ -88,16 +88,23 @@ def test_render_produces_pdf_magic_bytes() -> None:
 
 def test_render_contains_two_pages() -> None:
     """The template hard-codes a page break between health/tax and
-    attention/ask. Count the ``/Type /Page`` markers as a coarse
-    page-count check (not a hard-parse but enough to catch a bug
-    that collapses the doc to a single page)."""
+    attention/ask. Use pdfminer to count pages properly — the raw
+    byte-scan approach doesn't work because WeasyPrint uses object
+    streams that compress the /Type /Page markers out of the literal
+    bytes."""
     from app.pdf.renderer import render_template_to_pdf
 
     pdf = render_template_to_pdf("two_pager.html", _canonical_context())
-    page_markers = re.findall(rb"/Type\s*/Page[^s]", pdf)
-    assert len(page_markers) >= 2, (
-        f"Expected at least 2 pages, got {len(page_markers)} markers"
-    )
+    try:
+        from pdfminer.high_level import extract_pages
+        import io
+
+        pages = list(extract_pages(io.BytesIO(pdf)))
+        assert len(pages) >= 2, (
+            f"Expected at least 2 pages, got {len(pages)}"
+        )
+    except ImportError:
+        pytest.skip("pdfminer not installed; page-count check skipped")
 
 
 def test_render_includes_firm_and_client_names() -> None:
