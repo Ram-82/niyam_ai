@@ -337,10 +337,11 @@ function ChaseModal({
       cancelled = true;
     };
   }, [match.id, language]);
-  // Default: opt-in to save when this is a NEW supplier (no prefill),
-  // opt-out when we already had a directory entry (the CA presumably
-  // just wants to send with the on-file number).
-  const [saveToDirectory, setSaveToDirectory] = useState(prefill === null);
+  // Default OFF — opt-in for the save-to-directory side effect (matches
+  // the DeliveryPanel's "save to client" toggle). Keeps the primary
+  // send flow unblocked when the CA hasn't decided about the directory
+  // entry yet.
+  const [saveToDirectory, setSaveToDirectory] = useState(false);
   const [directoryName, setDirectoryName] = useState(prefill?.name ?? "");
   const [submitting, setSubmitting] = useState(false);
 

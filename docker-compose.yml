@@ -86,6 +86,13 @@ services:
       UPLOAD_DIR: /data/uploads
       GSP_MODE: mock
       GSP_BASE_URL: http://gsp-mock:9000
+      # Enable the P2 modules for dev + e2e. Both use mock transports
+      # (deterministic template narration, in-memory wamid.mock ids)
+      # so no external calls fire.
+      NARRATOR_ENABLED: "1"
+      NARRATOR_MODE: mock
+      WHATSAPP_ENABLED: "1"
+      WHATSAPP_MODE: mock
     ports:
       - "8000:8000"
     depends_on:

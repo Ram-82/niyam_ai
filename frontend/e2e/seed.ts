@@ -155,7 +155,28 @@ print(f"{firm_id}|{user_id}|{secret}")
   //
   // A second supplier is needed for the "without near-miss" case since
   // near-miss discovery gates on same-supplier.
-  const period = "202606";
+  //
+  // Period: compute last-completed-month at run time (Asia/Kolkata is
+  // close enough for a demo — the frontend's ``defaultPeriod`` uses
+  // the same calc). Hardcoding "202606" here would silently break the
+  // smoke every time the wall-clock month rolls forward, since the
+  // frontend's default period would then point at a period with no
+  // seed data.
+  const now = new Date();
+  const firstOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastOfPrev = new Date(firstOfThisMonth.getTime() - 24 * 60 * 60 * 1000);
+  const period = `${lastOfPrev.getFullYear().toString().padStart(4, "0")}${(
+    lastOfPrev.getMonth() + 1
+  )
+    .toString()
+    .padStart(2, "0")}`;
+  // Invoice dates live INSIDE the reconciliation period — the recon
+  // engine scopes invoices by month. Two dates: mid-month for the
+  // matched/near-miss cases, mid+2 for the probable/missing-entry.
+  const yyyyMm = `${period.slice(0, 4)}-${period.slice(4, 6)}`;
+  const midDate = `${yyyyMm}-15`;
+  const midPlus2 = `${yyyyMm}-17`;
+  const midPlus5 = `${yyyyMm}-20`;
   const supA = "29BBBBB1234C2Z8";
   const supB = "27CCCCC5678D3ZE";
   const seedRows = `
@@ -170,10 +191,10 @@ supB = "${supB}"
 pull_id = str(uuid.uuid4())
 with engine.begin() as c:
     for num, dt, cp, total in [
-        ("M-1",  "2026-06-15", supA, 100000),   # -> matched
-        ("P-1",  "2026-06-15", supA, 200000),   # -> probable via P/1
-        ("SD-A", "2026-06-15", supA, 400000),   # -> supplier_default WITH near-miss
-        ("SD-B", "2026-06-15", supB, 500000),   # -> supplier_default WITHOUT near-miss
+        ("M-1",  "${midDate}", supA, 100000),   # -> matched
+        ("P-1",  "${midDate}", supA, 200000),   # -> probable via P/1
+        ("SD-A", "${midDate}", supA, 400000),   # -> supplier_default WITH near-miss
+        ("SD-B", "${midDate}", supB, 500000),   # -> supplier_default WITHOUT near-miss
     ]:
         # content_hash computed in Python so we pass ONE unambiguous
         # text param (Postgres refuses to type-infer CONCAT of two
@@ -195,10 +216,10 @@ with engine.begin() as c:
         VALUES (:id, :f, :g, 'GSTR2B', '${period}', CAST('{}' AS JSONB), 'json_import')
     """), {"id": pull_id, "f": firm_id, "g": gid})
     for num, dt, sup, tx in [
-        ("M-1",     "2026-06-15", supA, 100000),   # exact match to register M-1
-        ("P/1",     "2026-06-17", supA, 200200),   # probable match to register P-1
-        ("SD-A",    "2026-06-15", supA, 999000),   # near-miss for register SD-A
-        ("GHOST-1", "2026-06-20", supA,   5000),   # missing_entry
+        ("M-1",     "${midDate}",  supA, 100000),   # exact match to register M-1
+        ("P/1",     "${midPlus2}", supA, 200200),   # probable match to register P-1
+        ("SD-A",    "${midDate}",  supA, 999000),   # near-miss for register SD-A
+        ("GHOST-1", "${midPlus5}", supA,   5000),   # missing_entry
     ]:
         c.execute(text("""
             INSERT INTO b2b_entry (firm_id, gstn_pull_id, supplier_gstin,
