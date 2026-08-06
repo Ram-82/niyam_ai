@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 
 from app.api.deps import (
@@ -24,7 +24,7 @@ from app.api.deps import (
     get_current_user,
     get_totp_setup_user,
 )
-from app.auth import audit, lockout, revocation, service
+from app.auth import audit, lockout, rate_limit, revocation, service
 from app.auth.passwords import WeakPasswordError as PWWeakError
 from app.auth.tokens import (
     Claims,
@@ -113,7 +113,8 @@ class MeResponse(BaseModel):
     response_model=RegisterResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def register(payload: RegisterRequest) -> RegisterResponse:
+def register(payload: RegisterRequest, request: Request) -> RegisterResponse:
+    _enforce_rate_limit("register_ip", _client_ip(request))
     try:
         user = service.register_from_invite(payload.invite_token, payload.password)
     except PWWeakError as e:
@@ -149,8 +150,14 @@ def _issue_token_pair(user: AppUser) -> TokenPair:
 
 
 @router.post("/login")
-def login(payload: LoginRequest, response: Response):
+def login(payload: LoginRequest, request: Request, response: Response):
     email = payload.email
+    # Rate limit BEFORE any DB work. IP first (cheap DoS shield) then
+    # email — both must pass. Order matters: an attacker cycling through
+    # emails from one IP hits the IP limit first and never poisons the
+    # per-email counters for real users.
+    _enforce_rate_limit("login_ip", _client_ip(request))
+    _enforce_rate_limit("login_email", email)
 
     try:
         user = service.authenticate(email, payload.password)
@@ -200,6 +207,30 @@ def login(payload: LoginRequest, response: Response):
             metadata={"totp": True},
         )
     return _issue_token_pair(user)
+
+
+def _client_ip(request: Request) -> str:
+    """Trust the leftmost X-Forwarded-For hop when present.
+
+    Gunicorn runs with ``--forwarded-allow-ips=*`` behind the ingress
+    (see docs/deployment.md); if you're deploying behind a CDN, tighten
+    that setting or the header is spoofable and the limiter is
+    bypassable per-request.
+    """
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_rate_limit(policy: str, identifier: str) -> None:
+    allowed, retry_after = rate_limit.check(policy, identifier)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="rate_limited",
+            headers={"Retry-After": str(retry_after)},
+        )
 
 
 def _maybe_audit_lockout_transition(email: str) -> None:

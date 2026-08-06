@@ -14,7 +14,7 @@ import pyotp
 import pytest
 from sqlalchemy import text
 
-from app.auth import lockout
+from app.auth import lockout, rate_limit
 from app.db import owner_engine
 
 
@@ -154,6 +154,12 @@ def test_lockout_expires_after_window(test_client, bootstrap_firm, monkeypatch) 
     assert lockout.is_locked(admin["email"])
     time.sleep(2.5)
     assert not lockout.is_locked(admin["email"])
+    # The failed-login burst above also consumed this email's rate-limit
+    # bucket. Lockout and rate-limit are two independent throttles; this
+    # test targets lockout, so drop the rate-limit counters explicitly
+    # before proving the correct password now works.
+    rate_limit.reset("login_email", admin["email"])
+    rate_limit.reset("login_ip", "testclient")
     # Correct login now succeeds again.
     r = test_client.post(
         "/auth/login",
