@@ -19,6 +19,7 @@ function row(over: Partial<CommandCenterRow>): CommandCenterRow {
     blockers_ca: 0,
     blockers_client: 0,
     last_computed_at: null,
+    filing_status: null,
     ...over,
   };
 }

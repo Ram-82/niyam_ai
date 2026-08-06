@@ -22,11 +22,22 @@ export interface CommandCenterRow {
   blockers_ca: number;
   blockers_client: number;
   last_computed_at: string | null;
+  filing_status: "draft" | "approved" | "filed" | null;
+}
+
+export interface CommandCenterSummary {
+  total_rows: number;
+  unfiled_count: number;
+  filed_count: number;
+  total_itc_at_risk_paise: number;
+  high_risk_count: number;
+  due_soon_count: number;
 }
 
 export interface CommandCenterResponse {
   period: string;
   rows: CommandCenterRow[];
+  summary: CommandCenterSummary;
 }
 
 export interface ReconSummary {

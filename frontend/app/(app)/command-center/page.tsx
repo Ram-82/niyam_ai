@@ -20,14 +20,22 @@ import type { CommandCenterResponse, CommandCenterRow } from "@/lib/types";
 export default function CommandCenterPage() {
   const [period, setPeriod] = useState(defaultPeriod());
   const [rows, setRows] = useState<CommandCenterRow[] | null>(null);
+  const [serverSummary, setServerSummary] = useState<
+    CommandCenterResponse["summary"] | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setRows(null);
+    setServerSummary(null);
     setError(null);
     api<CommandCenterResponse>(`/command-center?period=${period}`)
-      .then((r) => { if (!cancelled) setRows(r.rows); })
+      .then((r) => {
+        if (cancelled) return;
+        setRows(r.rows);
+        setServerSummary(r.summary);
+      })
       .catch((e) => { if (!cancelled) setError(String(e)); });
     return () => { cancelled = true; };
   }, [period]);
@@ -83,6 +91,14 @@ export default function CommandCenterPage() {
       sortable: true,
       sortValue: (r) => r.itc_at_risk_paise,
       width: "11rem",
+    },
+    {
+      key: "filing",
+      header: "Filing",
+      cell: (r) => <FilingPill status={r.filing_status} />,
+      sortable: true,
+      sortValue: (r) => r.filing_status ?? "",
+      width: "6rem",
     },
     {
       key: "blockers",
@@ -166,6 +182,45 @@ export default function CommandCenterPage() {
         />
       </div>
 
+      {/* Second row of tiles from the server-side summary. Kept below the
+          local-derived tiles so the frontend can still render something
+          useful if the server field is briefly missing (older API build). */}
+      {serverSummary && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+          <StatTile
+            label="Unfiled"
+            value={
+              <span data-testid="cc-summary-unfiled">
+                {serverSummary.unfiled_count}
+                <span className="text-ink-muted text-sm font-normal">
+                  {" / "}{serverSummary.total_rows}
+                </span>
+              </span>
+            }
+          />
+          <StatTile
+            label="Filed"
+            value={serverSummary.filed_count}
+          />
+          <StatTile
+            label="High risk"
+            value={
+              <span className={serverSummary.high_risk_count > 0 ? "text-red-fg" : ""}>
+                {serverSummary.high_risk_count}
+              </span>
+            }
+          />
+          <StatTile
+            label="Due in ≤3 days"
+            value={
+              <span className={serverSummary.due_soon_count > 0 ? "text-amber-fg" : ""}>
+                {serverSummary.due_soon_count}
+              </span>
+            }
+          />
+        </div>
+      )}
+
       {error && (
         <p className="text-sm text-red-fg bg-red-bg border border-rule rounded-md px-3 py-2">
           Couldn't load command center rows — {error}. Retry after
@@ -224,6 +279,22 @@ function BlockersSplit({ ca, client, total }: { ca: number; client: number; tota
           {client} client
         </span>
       )}
+    </span>
+  );
+}
+
+
+function FilingPill({ status }: { status: "draft" | "approved" | "filed" | null }) {
+  if (!status) return <span className="text-ink-muted text-xs">—</span>;
+  const cls =
+    status === "filed"
+      ? "bg-green-100 text-green-900"
+      : status === "approved"
+        ? "bg-blue-100 text-blue-900"
+        : "bg-amber-100 text-amber-900";
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ${cls}`}>
+      {status}
     </span>
   );
 }

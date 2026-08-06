@@ -57,11 +57,29 @@ class CommandCenterRow(BaseModel):
     blockers_ca: int
     blockers_client: int
     last_computed_at: Optional[datetime]
+    # None when no filing_run exists for (gid, period, return_type).
+    filing_status: Optional[str] = None
+
+
+class CommandCenterSummary(BaseModel):
+    """Firm-wide rollup across the visible rows.
+
+    Every field is derivable from ``rows`` — surfaced here so the frontend
+    can render KPI tiles without a client-side reduce (and so tests can
+    pin the aggregation logic in one place)."""
+
+    total_rows: int
+    unfiled_count: int              # rows without status='filed'
+    filed_count: int                # rows with status='filed'
+    total_itc_at_risk_paise: int    # sum across all rows
+    high_risk_count: int            # score < 60 OR any blockers
+    due_soon_count: int             # days_to_due_date <= 3
 
 
 class CommandCenterResponse(BaseModel):
     period: str
     rows: list[CommandCenterRow]
+    summary: CommandCenterSummary
 
 
 @router.get("", response_model=CommandCenterResponse)
@@ -104,7 +122,8 @@ def command_center(
             ls.score,
             ls.blockers,
             ls.computed_at,
-            lr.summary AS recon_summary
+            lr.summary AS recon_summary,
+            fr.status::text AS filing_status
         FROM client c
         JOIN gstin_profile gp ON gp.client_id = c.id
         CROSS JOIN (VALUES ('GSTR1'), ('GSTR3B')) rt(return_type)
@@ -112,6 +131,10 @@ def command_center(
             ON ls.gstin_profile_id = gp.id
            AND ls.return_type = rt.return_type
         LEFT JOIN latest_recon lr ON lr.gstin_profile_id = gp.id
+        LEFT JOIN filing_run fr
+            ON fr.gstin_profile_id = gp.id
+           AND fr.period = :period
+           AND fr.return_type::text = rt.return_type
     """
     params: dict[str, Any] = {"period": resolved_period}
     if is_staff:
@@ -157,6 +180,7 @@ def command_center(
                 blockers_ca=blockers_ca,
                 blockers_client=blockers_client,
                 last_computed_at=r["computed_at"],
+                filing_status=r["filing_status"],
             )
         )
 
@@ -168,7 +192,21 @@ def command_center(
             999 if row.days_to_due_date is None else row.days_to_due_date,
         )
     )
-    return CommandCenterResponse(period=resolved_period, rows=out)
+    summary = CommandCenterSummary(
+        total_rows=len(out),
+        unfiled_count=sum(1 for row in out if row.filing_status != "filed"),
+        filed_count=sum(1 for row in out if row.filing_status == "filed"),
+        total_itc_at_risk_paise=sum(row.itc_at_risk_paise for row in out),
+        high_risk_count=sum(
+            1 for row in out
+            if (row.score is not None and row.score < 60) or row.blockers_count > 0
+        ),
+        due_soon_count=sum(
+            1 for row in out
+            if row.days_to_due_date is not None and row.days_to_due_date <= 3
+        ),
+    )
+    return CommandCenterResponse(period=resolved_period, rows=out, summary=summary)
 
 
 # ---------------------------------------------------------------------------
