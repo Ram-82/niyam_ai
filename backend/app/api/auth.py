@@ -24,7 +24,7 @@ from app.api.deps import (
     get_current_user,
     get_totp_setup_user,
 )
-from app.auth import audit, lockout, rate_limit, revocation, service
+from app.auth import audit, lockout, password_reset, rate_limit, revocation, service
 from app.auth.passwords import WeakPasswordError as PWWeakError
 from app.auth.tokens import (
     Claims,
@@ -91,6 +91,15 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=8)
+    new_password: str
 
 
 class MeResponse(BaseModel):
@@ -301,6 +310,52 @@ def totp_verify(
 
 
 # ---------------------------------------------------------------------------
+# /password/forgot + /password/reset
+# ---------------------------------------------------------------------------
+
+
+@router.post("/password/forgot", status_code=status.HTTP_202_ACCEPTED)
+def forgot_password(
+    payload: ForgotPasswordRequest, request: Request
+) -> Response:
+    """Always returns 202 — never leaks whether the email is registered.
+
+    Rate limited by IP + email; both must pass. See rate_limit.POLICIES
+    for the caps.
+    """
+    _enforce_rate_limit("forgot_ip", _client_ip(request))
+    _enforce_rate_limit("forgot_email", payload.email)
+    password_reset.initiate_password_reset(
+        email=payload.email, requester_ip=_client_ip(request)
+    )
+    return Response(status_code=202)
+
+
+@router.post("/password/reset", status_code=status.HTTP_204_NO_CONTENT)
+def reset_password(payload: ResetPasswordRequest) -> Response:
+    try:
+        user = password_reset.complete_password_reset(
+            payload.token, payload.new_password
+        )
+    except PWWeakError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except password_reset.InvalidResetTokenError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # Audit the successful reset. RLS-scoped by the reset's firm_id.
+    with firm_scoped_session(user.firm_id) as session:
+        audit.record(
+            session=session,
+            firm_id=user.firm_id,
+            actor_user_id=user.id,
+            action="auth.password_reset",
+            entity_type="app_user",
+            entity_id=user.id,
+            metadata={},
+        )
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
 # /refresh
 # ---------------------------------------------------------------------------
 
@@ -328,6 +383,11 @@ def refresh(payload: RefreshRequest) -> TokenPair:
         user = session.get(AppUser, uuid.UUID(claims.sub))
         if user is None or not user.is_active or not user.totp_confirmed:
             raise HTTPException(status_code=401, detail="user not eligible")
+        # A password change since the token was issued invalidates every
+        # outstanding refresh token for this user. iat is unix seconds.
+        pw_changed = int(user.password_changed_at.timestamp())
+        if claims.iat < pw_changed:
+            raise HTTPException(status_code=401, detail="password changed; sign in again")
         _ = (user.id, user.firm_id, user.email, user.role)
 
     return _issue_token_pair(user)

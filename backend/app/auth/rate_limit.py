@@ -44,6 +44,11 @@ POLICIES: dict[str, Policy] = {
     "login_ip":       Policy("login_ip",       max_hits=10, window_s=60),
     "login_email":    Policy("login_email",    max_hits=5,  window_s=60),
     "register_ip":    Policy("register_ip",    max_hits=5,  window_s=3600),
+    # Password reset emails are expensive (real SMTP send) and useful
+    # for enumeration probes if unlimited. 3/hour per email, 5/hour per
+    # IP — tight because the legitimate use case is once a month.
+    "forgot_email":   Policy("forgot_email",   max_hits=3,  window_s=3600),
+    "forgot_ip":      Policy("forgot_ip",      max_hits=5,  window_s=3600),
 }
 
 

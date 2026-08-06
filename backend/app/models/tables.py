@@ -97,6 +97,12 @@ class AppUser(Base):
     last_login_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Stamped on every password change (initial hash + any reset). The
+    # refresh handler rejects any refresh token whose iat predates this,
+    # so a reset immediately kills every outstanding refresh for the user.
+    password_changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -129,6 +135,37 @@ class UserInvite(Base):
     accepted_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    created_at: Mapped[datetime] = _created_at()
+
+
+class PasswordReset(Base):
+    """One-shot self-service password reset token.
+
+    Same token-hash discipline as ``UserInvite``: raw token returned
+    only once via email link, DB stores the SHA-256 digest. Single-use
+    is enforced at the service layer via ``used_at``.
+    """
+
+    __tablename__ = "password_reset"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    firm_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ca_firm.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    requester_ip: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = _created_at()
 
 
