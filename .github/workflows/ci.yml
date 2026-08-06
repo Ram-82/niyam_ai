@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Backend: pytest inside the same docker image the app runs in. Uses compose
+  # so postgres/redis + the cairo/pango system libs come for free — matches
+  # what we run locally, no drift.
+  # ---------------------------------------------------------------------------
+  backend:
+    name: backend / pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker compose build backend
+
+      - name: Start postgres + redis
+        run: docker compose up -d postgres redis
+
+      - name: Wait for postgres
+        run: |
+          for i in {1..30}; do
+            if docker compose exec -T postgres pg_isready -U niyam -d niyam >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "postgres never became ready"; exit 1
+
+      - name: Alembic upgrade head
+        run: docker compose run --rm -T backend alembic upgrade head
+
+      - name: Run pytest (dev extras installed inline; --rm discards the
+              container layer so they must be installed in the same shell)
+        run: |
+          docker compose run --rm -T backend sh -c '
+            pip install -q -e ".[dev]" &&
+            pytest --timeout=30 --tb=line -q
+          '
+
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+
+  # ---------------------------------------------------------------------------
+  # Frontend: typecheck + vitest. No backend needed for these.
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: frontend / tsc + vitest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+  # ---------------------------------------------------------------------------
+  # Playwright end-to-end. Spins the full stack via compose so seed.ts's
+  # `docker compose run --rm -T backend python -` calls work as-is.
+  # Runs serialised (--workers=1) with 1 retry to absorb transient socket
+  # closes we saw locally on parallel workers.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: e2e / playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build backend + gsp-mock images
+        run: docker compose build backend api gsp-mock worker
+
+      - name: Start postgres + redis + api + gsp-mock
+        run: docker compose up -d postgres redis api gsp-mock
+
+      - name: Wait for postgres
+        run: |
+          for i in {1..30}; do
+            if docker compose exec -T postgres pg_isready -U niyam -d niyam >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Alembic upgrade head
+        run: docker compose run --rm -T backend alembic upgrade head
+
+      - name: Wait for api
+        run: |
+          for i in {1..40}; do
+            if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+              echo "api ready"; exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs --no-color --tail=200 api
+          exit 1
+
+      - name: Wait for gsp-mock
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:9000/health >/dev/null 2>&1; then
+              echo "gsp-mock ready"; exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs --no-color --tail=100 gsp-mock
+          exit 1
+
+      - name: npm ci (frontend)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Start Next.js dev server
+        working-directory: frontend
+        env:
+          NIYAM_API_BASE: http://localhost:8000
+        run: |
+          nohup npm run dev > next.log 2>&1 &
+          for i in {1..40}; do
+            if curl -fsS http://localhost:3000 >/dev/null 2>&1; then
+              echo "next ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "--- next.log ---"; cat next.log
+          exit 1
+
+      - name: Playwright
+        working-directory: frontend
+        env:
+          NIYAM_API_BASE: http://localhost:8000
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+        run: npx playwright test --workers=1 --retries=1
+
+      - name: Upload playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=300
