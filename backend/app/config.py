@@ -101,5 +101,22 @@ class Settings(BaseSettings):
     whatsapp_template_report_name: str = "niyam_report_v1"
     whatsapp_template_chase_name: str = "niyam_supplier_chase_v1"
 
+    # Email delivery feature flag + transport selection. Default OFF so no
+    # dev/demo run can spam real inboxes. When OFF, the invite endpoint's
+    # UI copy-URL fallback is the ONLY way an invite reaches the recipient
+    # — which is deliberate and correct until an operator provisions a
+    # real transport.
+    # 'console' → log the email body via observability; no external call.
+    # 'memory'  → in-process transport (tests only, records sends).
+    # 'smtp'    → future; will require SMTP host/port/creds.
+    # 'ses'     → future; AWS SES via boto3.
+    email_enabled: bool = False
+    email_mode: str = "console"
+    email_from: str = "no-reply@niyam.ai"
+    email_from_name: str = "Niyam AI"
+    # Public origin the invite / password-reset links point at. In prod
+    # this is the CA-facing dashboard URL (e.g. https://app.niyam.ai).
+    email_app_base_url: str = "http://localhost:3000"
+
 
 settings = Settings()

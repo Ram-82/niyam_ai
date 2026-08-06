@@ -6,6 +6,7 @@ admin's own firm.
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -13,12 +14,17 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 
 from app.api.deps import get_firm_scoped_session, require_admin
 from app.auth import audit
 from app.auth.service import hash_invite_token
+from app.config import settings
+from app.email import send_invite_email
 from app.models.tables import UserInvite, AppUser
+
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/invites", tags=["invites"])
@@ -69,6 +75,32 @@ def create_invite(
     )
     session.add(invite)
     session.flush()
+
+    email_sent = False
+    if settings.email_enabled:
+        firm_name = session.execute(
+            text("SELECT name FROM ca_firm WHERE id = :id"),
+            {"id": str(admin.firm_id)},
+        ).scalar() or ""
+        try:
+            send_invite_email(
+                to=payload.email,
+                invite_token=raw,
+                inviter_email=str(admin.email),
+                firm_name=firm_name,
+                role=payload.role,
+                expires_at=expires_at,
+            )
+            email_sent = True
+        except Exception as exc:
+            # An email transport failure MUST NOT rollback the invite.
+            # The invite_token is returned to the admin either way, and
+            # the copy-URL UI is the contract-guaranteed fallback.
+            logger.warning(
+                "invite.email_dispatch_failed",
+                extra={"invite_id": str(invite.id), "error": str(exc)},
+            )
+
     audit.record(
         session=session,
         firm_id=admin.firm_id,
@@ -76,7 +108,7 @@ def create_invite(
         action="invite.created",
         entity_type="user_invite",
         entity_id=invite.id,
-        metadata={"email": payload.email, "role": payload.role},
+        metadata={"email": payload.email, "role": payload.role, "email_sent": email_sent},
     )
     return InviteCreateResponse(
         invite_id=invite.id, invite_token=raw, expires_at=expires_at
