@@ -102,6 +102,11 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class MeResponse(BaseModel):
     id: uuid.UUID
     email: str
@@ -348,6 +353,43 @@ def reset_password(payload: ResetPasswordRequest) -> Response:
             firm_id=user.firm_id,
             actor_user_id=user.id,
             action="auth.password_reset",
+            entity_type="app_user",
+            entity_id=user.id,
+            metadata={},
+        )
+    return Response(status_code=204)
+
+
+@router.post("/password/change", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    payload: ChangePasswordRequest,
+    user: AppUser = Depends(get_current_user),
+) -> Response:
+    """Self-service password change (authenticated).
+
+    Verifies current password, updates hash, stamps password_changed_at.
+    The refresh handler's iat gate invalidates every OTHER outstanding
+    session for this user — the caller's current access token still
+    works until its 15-min TTL expires.
+    """
+    try:
+        service.change_password(
+            user_id=user.id,
+            firm_id=user.firm_id,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+        )
+    except PWWeakError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except service.InvalidCredentialsError:
+        raise HTTPException(status_code=401, detail="invalid current password")
+
+    with firm_scoped_session(user.firm_id) as session:
+        audit.record(
+            session=session,
+            firm_id=user.firm_id,
+            actor_user_id=user.id,
+            action="auth.password_changed",
             entity_type="app_user",
             entity_id=user.id,
             metadata={},

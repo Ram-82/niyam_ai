@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { StubBadge } from "@/components/atoms";
 import { DataTable, type Column } from "@/components/Table";
 import { EmptyState } from "@/components/EmptyState";
@@ -222,6 +222,8 @@ export default function SettingsPage() {
         )}
       </section>
 
+      <ChangePasswordCard />
+
       <section className="space-y-2">
         <h2 className="text-sm font-semibold text-ink">Live in P2 (sandbox / stubbed)</h2>
         <div className="flex flex-wrap gap-2 text-xs">
@@ -239,5 +241,122 @@ export default function SettingsPage() {
         </div>
       </section>
     </>
+  );
+}
+
+
+function ChangePasswordCard() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setMsg(null);
+    if (next.length < 12) {
+      setMsg({ kind: "error", text: "New password must be at least 12 characters." });
+      return;
+    }
+    if (next !== confirm) {
+      setMsg({ kind: "error", text: "The two new passwords don't match." });
+      return;
+    }
+    setLoading(true);
+    try {
+      await api("/auth/password/change", {
+        method: "POST",
+        body: { current_password: current, new_password: next },
+      });
+      setMsg({
+        kind: "ok",
+        text: "Password updated. Other signed-in sessions are now invalidated.",
+      });
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        setMsg({ kind: "error", text: "Current password is incorrect." });
+      } else if (e instanceof ApiError) {
+        setMsg({ kind: "error", text: e.message });
+      } else {
+        setMsg({ kind: "error", text: String(e) });
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold text-ink">Change password</h2>
+      <form
+        onSubmit={onSubmit}
+        className="bg-paper-raised border border-rule rounded-md p-6 max-w-[560px] space-y-3"
+        data-testid="change-password-form"
+      >
+        <label className="block">
+          <span className="text-sm font-semibold text-ink">Current password</span>
+          <input
+            type="password"
+            required
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            className={inputCls + " mt-1 w-full"}
+            data-testid="change-current"
+          />
+        </label>
+        <label className="block">
+          <span className="text-sm font-semibold text-ink">New password</span>
+          <input
+            type="password"
+            required
+            minLength={12}
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            className={inputCls + " mt-1 w-full"}
+            data-testid="change-new"
+          />
+          <span className="mt-1 block text-xs text-ink-muted">
+            At least 12 characters.
+          </span>
+        </label>
+        <label className="block">
+          <span className="text-sm font-semibold text-ink">Confirm new password</span>
+          <input
+            type="password"
+            required
+            minLength={12}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            className={inputCls + " mt-1 w-full"}
+            data-testid="change-confirm"
+          />
+        </label>
+        {msg && (
+          <p
+            className={
+              "text-sm border rounded-sm px-3 py-2 " +
+              (msg.kind === "ok"
+                ? "bg-green-bg text-green-fg border-rule"
+                : "bg-red-bg text-red-fg border-rule")
+            }
+            data-testid="change-message"
+          >
+            {msg.text}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={loading}
+          className={btnPrimaryCls + " disabled:opacity-50"}
+          data-testid="change-submit"
+        >
+          {loading ? "Updating…" : "Update password"}
+        </button>
+      </form>
+    </section>
   );
 }

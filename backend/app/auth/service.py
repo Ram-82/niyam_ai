@@ -209,6 +209,44 @@ def touch_last_login(user_id: uuid.UUID | str, firm_id: uuid.UUID | str) -> None
         )
 
 
+def change_password(
+    user_id: uuid.UUID | str,
+    firm_id: uuid.UUID | str,
+    current_password: str,
+    new_password: str,
+) -> AppUser:
+    """Self-service password change (caller is authenticated).
+
+    Verifies ``current_password``, enforces policy on ``new_password``,
+    updates the hash, and stamps ``password_changed_at``. The refresh
+    handler's iat gate then invalidates every OTHER outstanding session
+    for this user on the next /refresh attempt — the current access
+    token is unaffected (it expires on its own in 15 min).
+
+    Raises:
+    * ``InvalidCredentialsError`` — current_password wrong
+    * ``WeakPasswordError`` — new_password doesn't meet policy
+    """
+    from app.auth.passwords import assert_password_strength
+
+    assert_password_strength(new_password)
+    now = datetime.now(tz=timezone.utc)
+
+    with firm_scoped_session(firm_id) as session:
+        user = session.get(AppUser, uuid.UUID(str(user_id)))
+        if user is None:
+            raise InvalidCredentialsError("user not found")
+        if not verify_password(current_password, user.password_hash):
+            raise InvalidCredentialsError("invalid current password")
+
+        user.password_hash = hash_password(new_password)
+        user.password_changed_at = now
+        session.flush()
+        _ = (user.id, user.firm_id, user.email, user.role)
+
+    return user
+
+
 # ---------------------------------------------------------------------------
 # TOTP setup / verify
 # ---------------------------------------------------------------------------
