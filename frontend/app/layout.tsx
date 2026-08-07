@@ -1,22 +1,22 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import { Inter, IBM_Plex_Mono, Source_Serif_4 } from "next/font/google";
+import { Archivo, IBM_Plex_Mono, Zilla_Slab } from "next/font/google";
 
 
-// Three roles, three families.
-//   sans  — Inter        (body, labels, controls, wordmark)
-//   serif — Source Serif 4 (page titles, hero labels — Claude-esque)
+// Three roles, three families (per Claude Design bundler spec).
+//   sans  — Archivo    (body, labels, controls, wordmark)
+//   serif — Zilla Slab (page titles, hero labels)
 //   mono  — IBM Plex Mono (money, scores, GSTINs, invoice numbers, periods, dates)
 //
 // Weight 400 + 600 only — anything else is a token violation.
-const inter = Inter({
+const archivo = Archivo({
   subsets: ["latin"],
   weight: ["400", "600"],
   display: "swap",
   variable: "--font-sans",
 });
 
-const sourceSerif = Source_Serif_4({
+const zillaSlab = Zilla_Slab({
   subsets: ["latin"],
   weight: ["400", "600"],
   display: "swap",
@@ -45,7 +45,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${sourceSerif.variable} ${plexMono.variable}`}
+      className={`${archivo.variable} ${zillaSlab.variable} ${plexMono.variable}`}
     >
       <body>{children}</body>
     </html>

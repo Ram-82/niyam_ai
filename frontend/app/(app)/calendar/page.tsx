@@ -183,6 +183,13 @@ export default function CalendarPage() {
           Load failed — {error}
         </p>
       )}
+      {/* Design spec: purple-accented info box explaining that dates
+          come from the rule pack (which is CA-review-pending). */}
+      <div className="bg-paper-raised border border-rule border-l-[4px] border-l-purple-accent rounded-sm px-[14px] py-[11px] max-w-[720px] text-[12.5px] text-ink-muted">
+        Due dates come from rule pack v1.0.0 and are pending CA review.
+        Filed periods drop out of this view automatically; reminders fire
+        against the same window at 7 / 3 / 1 / 0 days before due.
+      </div>
       {data === null && !error && <SkeletonTable rows={4} cols={6} />}
       {data && data.rows.length === 0 && (
         <EmptyState
@@ -199,20 +206,24 @@ export default function CalendarPage() {
               if (rows.length === 0) return null;
               return (
                 <section key={b} className="space-y-2">
-                  <h2 className="text-sm font-semibold text-ink flex items-center gap-2">
+                  <h2 className="text-[13.5px] font-semibold text-ink flex items-center gap-2 uppercase tracking-[0.06em]">
                     {BUCKET_LABEL[b]}
-                    <span className="text-xs text-ink-muted font-normal">
+                    <span className="text-[11.5px] text-ink-muted font-normal normal-case tracking-normal">
                       ({rows.length})
                     </span>
                   </h2>
-                  <DataTable
-                    columns={cols}
-                    rows={rows}
-                    rowKey={(r) =>
-                      `${r.gstin_profile_id}-${r.period}-${r.return_type}`
-                    }
-                    rowTestId={`calendar-row-${b}`}
-                  />
+                  {/* Design spec: bucket-group card with 4px purple
+                      left accent + 1px rule border, white surface. */}
+                  <div className="bg-paper-raised border border-rule border-l-[4px] border-l-purple-accent rounded-sm overflow-hidden">
+                    <DataTable
+                      columns={cols}
+                      rows={rows}
+                      rowKey={(r) =>
+                        `${r.gstin_profile_id}-${r.period}-${r.return_type}`
+                      }
+                      rowTestId={`calendar-row-${b}`}
+                    />
+                  </div>
                 </section>
               );
             },

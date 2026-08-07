@@ -36,6 +36,8 @@ const config: Config = {
       "green-strong": "var(--green-strong)",
       "grey-fg": "var(--grey-fg)",
       "grey-bg": "var(--grey-bg)",
+      "purple-accent": "var(--purple-accent)",
+      "row-hover": "var(--row-hover)",
       white: "#FFFFFF",
     },
     fontSize: {
