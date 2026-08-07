@@ -11,6 +11,7 @@ All mutations audited.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -31,6 +32,7 @@ class UserRow(BaseModel):
     role: str
     is_active: bool
     totp_confirmed: bool
+    last_login_at: Optional[datetime]
 
 
 @router.get("/users", response_model=list[UserRow])
@@ -40,7 +42,8 @@ def list_users(
 ) -> list[UserRow]:
     rows = session.execute(
         text(
-            "SELECT id, email, role::text, is_active, totp_confirmed "
+            "SELECT id, email, role::text, is_active, totp_confirmed, "
+            "       last_login_at "
             "FROM app_user ORDER BY email"
         )
     ).mappings().all()
@@ -51,6 +54,7 @@ def list_users(
             role=r["role"],
             is_active=r["is_active"],
             totp_confirmed=r["totp_confirmed"],
+            last_login_at=r["last_login_at"],
         )
         for r in rows
     ]

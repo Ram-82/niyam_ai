@@ -176,6 +176,7 @@ export interface User {
   role: "admin" | "staff";
   is_active: boolean;
   totp_confirmed: boolean;
+  last_login_at: string | null;
 }
 
 export interface InviteRow {
