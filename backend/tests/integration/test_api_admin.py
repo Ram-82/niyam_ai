@@ -53,9 +53,17 @@ def test_admin_lists_users_in_firm(test_client, bootstrap_firm) -> None:
     access = _login(test_client, admin)
     r = test_client.get("/users", headers={"Authorization": f"Bearer {access}"})
     assert r.status_code == 200, r.text
-    emails = {u["email"].lower() for u in r.json()}
+    rows = r.json()
+    emails = {u["email"].lower() for u in rows}
     assert "ad-list@example.com" in emails
     assert "s1@ex.com" in emails
+    # last_login_at surfaces on the row (may be null for the seeded
+    # staff who hasn't logged in yet, but the field MUST exist).
+    for u in rows:
+        assert "last_login_at" in u
+    admin_row = next(u for u in rows if u["email"].lower() == "ad-list@example.com")
+    # The _login helper above just fired — last_login_at is populated.
+    assert admin_row["last_login_at"] is not None
 
 
 def test_staff_cannot_list_users(test_client, bootstrap_firm) -> None:

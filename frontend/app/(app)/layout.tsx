@@ -49,15 +49,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       )}
       <header className="bg-paper-raised border-b border-rule sticky top-0 z-30">
-        <div className="max-w-[1320px] mx-auto flex items-center px-6 h-14 gap-8">
+        <div className="max-w-[1700px] mx-auto flex items-center px-5 h-[50px] gap-8">
           <Link
             href="/command-center"
-            className="font-mono font-semibold text-ink tracking-tight text-lg"
+            className="font-serif font-semibold text-ink text-[19px] leading-none"
             title="Niyam AI"
           >
             Niyam AI
           </Link>
-          <nav className="flex gap-6 text-sm h-full items-stretch">
+          <nav className="flex gap-[22px] text-[13.5px] h-full items-stretch">
             <NavLink href="/command-center" pathname={pathname}>Command center</NavLink>
             <NavLink href="/calendar" pathname={pathname}>Calendar</NavLink>
             <NavLink href="/imports" pathname={pathname}>Imports</NavLink>
@@ -67,13 +67,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="ml-auto flex items-center gap-4 text-xs text-ink-muted">
             {me && (
               <div className="text-right leading-tight">
-                <div className="text-ink font-semibold">{me.firm_name || "—"}</div>
-                <div className="font-mono">{me.email}</div>
+                <div className="text-ink font-semibold text-[12.5px]">{me.firm_name || "—"}</div>
+                <div className="font-mono text-[11.5px]">{me.email}</div>
               </div>
             )}
             <button
               onClick={() => { clearAccessToken(); router.push("/login"); }}
-              className="text-sm text-ink-muted hover:text-ink border-l border-rule pl-4 h-6 self-center"
+              className="text-[12.5px] text-ink-muted hover:text-ink border-l border-rule pl-4 h-6 self-center"
               data-testid="logout"
             >
               Sign out
@@ -81,7 +81,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="max-w-[1320px] mx-auto px-6 py-8 space-y-8">{children}</main>
+      <main className="max-w-[1700px] mx-auto px-5 pt-[22px] pb-20 space-y-8">{children}</main>
     </div>
   );
 }
@@ -97,13 +97,15 @@ function NavLink({
   children: React.ReactNode;
 }) {
   const active = pathname === href || pathname.startsWith(href + "/");
+  // Design spec: active tab has 2px bottom border in --purple-accent
+  // (differentiates from the --accent blue which is action colour).
   return (
     <Link
       href={href}
       className={
         "flex items-center border-b-2 -mb-px transition-colors duration-fast " +
         (active
-          ? "border-accent text-ink font-semibold"
+          ? "border-purple-accent text-ink font-semibold"
           : "border-transparent text-ink-muted hover:text-ink")
       }
     >

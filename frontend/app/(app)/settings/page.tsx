@@ -103,6 +103,24 @@ export default function SettingsPage() {
       width: "9rem",
     },
     {
+      key: "last_login",
+      header: "Last login",
+      cell: (u) =>
+        u.last_login_at ? (
+          <span
+            className="text-xs tabular-nums"
+            title={new Date(u.last_login_at).toLocaleString()}
+          >
+            {new Date(u.last_login_at).toLocaleDateString()}
+          </span>
+        ) : (
+          <span className="text-ink-muted text-xs">Never</span>
+        ),
+      sortable: true,
+      sortValue: (u) => u.last_login_at ?? "",
+      width: "8rem",
+    },
+    {
       key: "assign",
       header: "Assign to client",
       cell: (u) => (

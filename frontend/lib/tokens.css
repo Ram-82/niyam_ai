@@ -44,6 +44,16 @@
   --grey-fg: #5A6070;
   --grey-bg: #EDEBE5;
 
+  /* Deep purple — the design's callout-accent, used as a 4px left
+     border on info boxes and grouped-table cards. Not a status colour
+     — never bind to error/warning/success. */
+  --purple-accent: #563A8F;
+
+  /* Slight-blue table-row hover. Deliberately different from
+     --accent-tint (which is the selected-state) so users can tell
+     hover apart from selection. */
+  --row-hover: #F1F4F8;
+
   /* ── Typography scale ──
    * Larger, Claude-like reading register. Body base at 16px, generous
    * line-heights, one display serif (Source Serif 4) for page titles.

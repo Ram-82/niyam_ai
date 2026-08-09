@@ -130,7 +130,7 @@ export function DataTable<T>({
                 data-testid={rowTestId}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 className={
-                  "h-12 border-b border-rule last:border-b-0 hover:bg-accent-tint/40 transition-colors duration-fast" +
+                  "h-[34px] border-b border-rule last:border-b-0 hover:bg-row-hover transition-colors duration-fast" +
                   (onRowClick ? " cursor-pointer" : "")
                 }
               >
