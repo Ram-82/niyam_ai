@@ -177,9 +177,11 @@ export default function SettingsPage() {
         </p>
       )}
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-ink">Users</h2>
-        {users === null && <SkeletonTable rows={3} cols={5} />}
+      <section className="bg-paper-raised border border-rule rounded-md overflow-hidden">
+        <div className="px-6 py-3 border-b border-rule bg-paper">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Users</h2>
+        </div>
+        {users === null && <div className="p-4"><SkeletonTable rows={3} cols={5} /></div>}
         {users !== null && (
           <DataTable
             columns={userCols}
@@ -196,59 +198,66 @@ export default function SettingsPage() {
         )}
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-ink">Clients</h2>
-        <form onSubmit={createClient} className="bg-paper-raised border border-rule rounded-md p-6 max-w-[560px] flex items-end gap-3 flex-wrap">
-          <label className="flex-1 min-w-[16rem]">
-            <span className="text-sm font-semibold text-ink">Trade name</span>
-            <input
-              name="trade_name"
-              required
-              placeholder="e.g. Ramesh Textiles Pvt Ltd"
-              className={"mt-1 w-full " + inputCls}
+      <section className="bg-paper-raised border border-rule rounded-md overflow-hidden">
+        <div className="px-6 py-3 border-b border-rule bg-paper">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Clients</h2>
+        </div>
+        <div className="p-6 space-y-4">
+          <form onSubmit={createClient} className="flex items-end gap-3 flex-wrap">
+            <label className="flex-1 min-w-[16rem]">
+              <span className="text-sm font-semibold text-ink">Trade name</span>
+              <input
+                name="trade_name"
+                required
+                placeholder="e.g. Ramesh Textiles Pvt Ltd"
+                className={"mt-1 w-full " + inputCls}
+              />
+            </label>
+            <label className="w-20">
+              <span className="text-sm font-semibold text-ink">Lang</span>
+              <input
+                name="language"
+                defaultValue="en"
+                className={"mt-1 w-full " + inputCls}
+                aria-label="Language code"
+              />
+            </label>
+            <button className={btnPrimaryCls}>Create client</button>
+          </form>
+          {clients === null && <SkeletonTable rows={3} cols={2} />}
+          {clients !== null && clients.length === 0 && (
+            <EmptyState
+              title="No clients yet"
+              body="Add your first client using the form above. Each client can hold multiple GSTINs."
             />
-          </label>
-          <label className="w-20">
-            <span className="text-sm font-semibold text-ink">Lang</span>
-            <input
-              name="language"
-              defaultValue="en"
-              className={"mt-1 w-full " + inputCls}
-              aria-label="Language code"
-            />
-          </label>
-          <button className={btnPrimaryCls}>Create client</button>
-        </form>
-        {clients === null && <SkeletonTable rows={3} cols={2} />}
-        {clients !== null && clients.length === 0 && (
-          <EmptyState
-            title="No clients yet"
-            body="Add your first client using the form above. Each client can hold multiple GSTINs."
-          />
-        )}
-        {clients !== null && clients.length > 0 && (
-          <ul className="text-sm bg-paper-raised border border-rule rounded-md divide-y divide-rule">
-            {clients.map((c) => (
-              <li key={c.id} className="p-3 flex items-center gap-3">
-                <span className="text-ink">{c.trade_name}</span>
-                <span className="font-mono text-xs text-ink-muted ml-auto">
-                  {c.id.slice(0, 8)}…
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+          )}
+          {clients !== null && clients.length > 0 && (
+            <ul className="text-sm divide-y divide-rule border border-rule rounded-sm">
+              {clients.map((c) => (
+                <li key={c.id} className="px-4 py-2 flex items-center gap-3">
+                  <span className="text-ink">{c.trade_name}</span>
+                  <span className="font-mono text-xs text-ink-muted ml-auto">
+                    {c.id.slice(0, 8)}…
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </section>
 
-      <FirmPreferencesCard />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <FirmPreferencesCard />
+        <ChangePasswordCard />
+      </div>
 
-      <ChangePasswordCard />
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-ink">Live in P2 (sandbox / stubbed)</h2>
-        <div className="flex flex-wrap gap-2 text-xs">
+      <section className="bg-paper-raised border border-rule rounded-md overflow-hidden">
+        <div className="px-6 py-3 border-b border-rule bg-paper">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Live in P2 (sandbox / stubbed)</h2>
+        </div>
+        <div className="p-6 flex flex-wrap gap-2 text-xs">
           <span
-            className="px-2 py-0.5 rounded-sm bg-amber-100 text-amber-900 border border-amber-300 font-semibold"
+            className="px-2 py-0.5 rounded-sm bg-amber-bg text-amber-fg border border-rule font-semibold"
             title="Live GSP pull is wired end-to-end against a local mock GSP. When a real GSP vendor is provisioned, only app/gsp/adapter_*.py needs a new file."
           >
             Live GSP pull — mock adapter
@@ -263,6 +272,7 @@ export default function SettingsPage() {
     </>
   );
 }
+
 
 
 function FirmPreferencesCard() {

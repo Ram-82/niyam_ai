@@ -1,7 +1,7 @@
 """Runtime settings loaded from env / .env."""
 from __future__ import annotations
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -118,12 +118,52 @@ class Settings(BaseSettings):
     # this is the CA-facing dashboard URL (e.g. https://app.niyam.ai).
     email_app_base_url: str = "http://localhost:3000"
 
+    # SQLAlchemy connection pool tuning.
+    # pool_size × WEB_WORKERS = total persistent connections to Postgres.
+    # max_overflow × WEB_WORKERS = burst headroom above that.
+    # Rule of thumb: keep (pool_size + max_overflow) × workers < pg max_connections − 10.
+    db_pool_size: int = 5
+    db_pool_max_overflow: int = 10
+
     # Due-date reminder sweep. Fires when the /scheduler/reminders/sweep
     # cron endpoint runs. Independent of email_enabled — even with the
     # cron wired, the sweep is a no-op until this flips true. Reason:
     # sweeps are heavy (whole-firm fanout) and pre-launch dry-runs would
     # spam every staff account.
     reminders_enabled: bool = False
+
+    @model_validator(mode="after")
+    def _check_secrets(self) -> "Settings":
+        # JWT secret must be at least 32 bytes. The docker-compose dev default
+        # ("dev-only-jwt-secret-change-in-prod", 34 chars) passes; the literal
+        # Settings default ("change-me-in-real-env", 22 chars) does not — which
+        # is intentional: running uvicorn without any env should fail loudly.
+        if len(self.jwt_secret.encode()) < 32:
+            raise ValueError(
+                "JWT_SECRET must be at least 32 bytes. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+        # Feature-flag credential checks: only enforce when the mode requires
+        # a real external credential (mock modes need no credentials).
+        if self.narrator_enabled and self.narrator_mode == "anthropic" and not self.anthropic_api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY must be set when narrator_enabled=true and narrator_mode='anthropic'"
+            )
+        if self.whatsapp_enabled and self.whatsapp_mode == "meta":
+            if not self.whatsapp_access_token:
+                raise ValueError(
+                    "WHATSAPP_ACCESS_TOKEN must be set when whatsapp_enabled=true and whatsapp_mode='meta'"
+                )
+            if not self.whatsapp_app_secret:
+                raise ValueError(
+                    "WHATSAPP_APP_SECRET must be set when whatsapp_enabled=true and whatsapp_mode='meta'"
+                )
+        if self.gsp_mode == "live" and "gsp-mock" in self.gsp_base_url:
+            raise ValueError(
+                "GSP_BASE_URL still points at the local mock server while gsp_mode='live'. "
+                "Set GSP_BASE_URL to your GSP vendor's endpoint."
+            )
+        return self
 
 
 settings = Settings()

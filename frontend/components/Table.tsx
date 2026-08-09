@@ -13,7 +13,7 @@
  * render through it.
  */
 "use client";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 
 export type Column<T> = {
@@ -39,6 +39,8 @@ export function DataTable<T>({
   initialSort,
   rowKey,
   onRowClick,
+  expandRow,
+  rowClass,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -47,8 +49,11 @@ export function DataTable<T>({
   initialSort?: SortState;
   rowKey: (row: T, i: number) => string;
   onRowClick?: (row: T) => void;
+  expandRow?: (row: T) => React.ReactNode;
+  rowClass?: (row: T) => string;
 }) {
   const [sort, setSort] = useState<SortState>(initialSort ?? null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const sorted = useMemo(() => {
     if (!sort) return rows;
@@ -124,33 +129,59 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((row, i) => (
-              <tr
-                key={rowKey(row, i)}
-                data-testid={rowTestId}
-                onClick={onRowClick ? () => onRowClick(row) : undefined}
-                className={
-                  "h-[34px] border-b border-rule last:border-b-0 hover:bg-row-hover transition-colors duration-fast" +
-                  (onRowClick ? " cursor-pointer" : "")
-                }
-              >
-                {columns.map((c) => {
-                  const align = c.align ?? (c.numeric ? "right" : "left");
-                  return (
-                    <td
-                      key={c.key}
-                      className={
-                        "px-4 py-2 align-middle whitespace-nowrap " +
-                        (align === "right" ? "text-right" : "text-left") +
-                        (c.numeric ? " font-mono" : "")
+            {sorted.map((row, i) => {
+              const key = rowKey(row, i);
+              const isExpanded = expandedKey === key;
+              const expandContent = expandRow?.(row);
+              const hasExpand = expandContent != null;
+              const extraCls = rowClass?.(row) ?? "";
+              const clickable = !!(onRowClick || hasExpand);
+              return (
+                <Fragment key={key}>
+                  <tr
+                    data-testid={rowTestId}
+                    onClick={() => {
+                      if (hasExpand) {
+                        setExpandedKey(isExpanded ? null : key);
+                      } else if (onRowClick) {
+                        onRowClick(row);
                       }
-                    >
-                      {c.cell(row)}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
+                    }}
+                    className={
+                      "h-[34px] border-b border-rule last:border-b-0 hover:bg-row-hover transition-colors duration-fast" +
+                      (clickable ? " cursor-pointer" : "") +
+                      (extraCls ? " " + extraCls : "")
+                    }
+                  >
+                    {columns.map((c) => {
+                      const align = c.align ?? (c.numeric ? "right" : "left");
+                      return (
+                        <td
+                          key={c.key}
+                          className={
+                            "px-4 py-2 align-middle whitespace-nowrap " +
+                            (align === "right" ? "text-right" : "text-left") +
+                            (c.numeric ? " font-mono" : "")
+                          }
+                        >
+                          {c.cell(row)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  {isExpanded && hasExpand && (
+                    <tr className="border-b border-rule last:border-b-0">
+                      <td
+                        colSpan={columns.length}
+                        className="px-4 py-3 bg-paper"
+                      >
+                        {expandContent}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

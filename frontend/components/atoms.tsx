@@ -125,6 +125,37 @@ export function OwnerBadge({ owner }: { owner: "ca" | "client" }) {
 }
 
 
+const FILING_STATUS_GLYPH: Record<string, { glyph: string; label: string; cls: string }> = {
+  draft:    { glyph: "◑", label: "Draft",    cls: "bg-amber-bg text-amber-fg" },
+  approved: { glyph: "◆", label: "Approved", cls: "bg-stamp-tint text-stamp" },
+  filed:    { glyph: "●", label: "Filed",    cls: "bg-green-bg text-green-fg" },
+};
+
+/**
+ * Filing-status chip with a glyph in a fixed 9px slot so the state
+ * reads in greyscale and survives colour-blindness.
+ */
+export function StateChip({ status }: { status: string | null | undefined }) {
+  if (!status) {
+    return <span className="text-xs text-ink-muted">Not started</span>;
+  }
+  const s = FILING_STATUS_GLYPH[status];
+  if (!s) {
+    return (
+      <span className="text-xs px-2 py-0.5 rounded-sm bg-grey-bg text-ink-muted">
+        {status}
+      </span>
+    );
+  }
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-sm ${s.cls}`}>
+      <span className="inline-block w-[9px] text-center shrink-0" aria-hidden="true">{s.glyph}</span>
+      {s.label}
+    </span>
+  );
+}
+
+
 /**
  * Anything backed by a stub interface must be visibly labelled so a
  * demo can't accidentally imply a feature works.

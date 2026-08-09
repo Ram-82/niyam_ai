@@ -49,6 +49,11 @@
      — never bind to error/warning/success. */
   --purple-accent: #563A8F;
 
+  /* Stamp violet — CA approval seal only. Never repurpose for other states.
+     Fg is the authoritative seal colour; tint is the row wash. */
+  --stamp: #6D28D9;
+  --stamp-tint: #EDE9FE;
+
   /* Slight-blue table-row hover. Deliberately different from
      --accent-tint (which is the selected-state) so users can tell
      hover apart from selection. */

@@ -38,6 +38,8 @@ const config: Config = {
       "grey-bg": "var(--grey-bg)",
       "purple-accent": "var(--purple-accent)",
       "row-hover": "var(--row-hover)",
+      stamp: "var(--stamp)",
+      "stamp-tint": "var(--stamp-tint)",
       white: "#FFFFFF",
     },
     fontSize: {

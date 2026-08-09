@@ -29,6 +29,10 @@ def _make_app_engine() -> Engine:
         settings.app_database_url,
         future=True,
         pool_pre_ping=True,
+        # pool_size * WEB_WORKERS must stay below Postgres max_connections.
+        # Default: 5 per worker × 4 workers = 20 total. Override via config.
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_pool_max_overflow,
     )
 
     @event.listens_for(engine, "connect")
