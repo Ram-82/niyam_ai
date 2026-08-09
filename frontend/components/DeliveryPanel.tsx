@@ -55,7 +55,8 @@ import type {
  */
 type Panel =
   | { state: "idle" }                                    // ready to generate
-  | { state: "disabled" }                                // WHATSAPP_ENABLED=false
+  | { state: "narrator_disabled" }                       // NARRATOR_ENABLED=false
+  | { state: "whatsapp_disabled"; narration?: NarrationOutput }  // WHATSAPP_ENABLED=false
   | { state: "narration_ready"; narration: NarrationOutput }
   | { state: "preparing"; narration: NarrationOutput };
 
@@ -86,13 +87,17 @@ export function DeliveryPanel({
   const loadAttempts = useCallback(async () => {
     try {
       const rows = await api<DeliveryAttemptRow[]>(`/whatsapp/attempts?limit=25`);
-      // The list surface returns firm-wide; the workspace scope filter
-      // (gstin + period) will be added when the endpoint accepts it.
-      // For now the CA-scope is enough for the demo.
       setAttempts(rows);
     } catch (e) {
       if (e instanceof ApiError && e.status === 503) {
-        setPanel({ state: "disabled" });
+        // WhatsApp disabled — still allow narration generation.
+        setPanel((p) =>
+          p.state === "narration_ready" || p.state === "preparing"
+            ? { state: "whatsapp_disabled", narration: p.narration }
+            : p.state === "idle" || p.state === "narrator_disabled"
+            ? { state: "whatsapp_disabled" }
+            : p
+        );
         return;
       }
       setError(e instanceof Error ? e.message : String(e));
@@ -119,11 +124,20 @@ export function DeliveryPanel({
       setPanel({ state: "narration_ready", narration: out });
     } catch (e) {
       if (e instanceof ApiError && e.status === 503) {
-        setPanel({ state: "disabled" });
+        const detail = (e as ApiError).message ?? "";
+        if (detail.includes("narrator_disabled")) {
+          setPanel({ state: "narrator_disabled" });
+        } else {
+          // WhatsApp disabled mid-session.
+          setPanel((p) =>
+            p.state === "narration_ready" || p.state === "preparing"
+              ? { state: "whatsapp_disabled", narration: p.narration }
+              : { state: "whatsapp_disabled" }
+          );
+        }
         return;
       }
       if (e instanceof ApiError && e.status === 409) {
-        // no_readiness_snapshot — the CA needs to run scoring first.
         setError(
           "No readiness snapshot yet for this period + return type. Run scoring on the Returns tab first.",
         );
@@ -229,24 +243,38 @@ export function DeliveryPanel({
         </p>
       )}
 
-      {panel.state === "disabled" && <DisabledCallout />}
+      {panel.state === "narrator_disabled" && <NarratorDisabledCallout />}
 
-      {panel.state === "idle" && (
+      {panel.state === "whatsapp_disabled" && <WhatsAppDisabledCallout />}
+
+      {(panel.state === "idle" ||
+        (panel.state === "whatsapp_disabled" && !panel.narration)) && (
         <NoNarrationCallout onGenerate={generate} generating={regenerating} />
       )}
 
-      {panel.state === "narration_ready" && (
+      {(panel.state === "narration_ready" ||
+        (panel.state === "whatsapp_disabled" && panel.narration)) && (
         <>
           <NarrationPreview
-            narration={panel.narration}
-            onRegenerate={() => generate(panel.narration.language)}
+            narration={
+              panel.state === "whatsapp_disabled" ? panel.narration! : panel.narration
+            }
+            onRegenerate={() =>
+              generate(
+                panel.state === "whatsapp_disabled"
+                  ? panel.narration!.language
+                  : panel.narration.language,
+              )
+            }
             regenerating={regenerating}
           />
           <div className="flex gap-3 flex-wrap">
             <button
               onClick={openPrepare}
-              className="px-4 py-2 bg-accent text-paper-raised font-semibold rounded-sm hover:bg-accent-hover transition-colors duration-fast"
+              disabled={panel.state === "whatsapp_disabled"}
+              className="px-4 py-2 bg-accent text-paper-raised font-semibold rounded-sm hover:bg-accent-hover transition-colors duration-fast disabled:opacity-40 disabled:cursor-not-allowed"
               data-testid="prepare-delivery"
+              title={panel.state === "whatsapp_disabled" ? "WhatsApp delivery is disabled" : undefined}
             >
               Send via WhatsApp
             </button>
@@ -264,6 +292,7 @@ export function DeliveryPanel({
       {panel.state === "preparing" && (
         <PrepareModal
           narration={panel.narration}
+
           defaultNumber={clientWhatsappNumber || ""}
           defaultLanguage={clientDefaultLanguage || panel.narration.language}
           allowSaveToClient={!!clientId}
@@ -285,13 +314,25 @@ export function DeliveryPanel({
 }
 
 
-function DisabledCallout() {
+function NarratorDisabledCallout() {
+  return (
+    <div className="text-sm p-3 bg-amber-bg border border-rule rounded-md text-amber-fg">
+      <span className="font-semibold">Narration is disabled in this environment.</span>{" "}
+      An admin needs to set <span className="font-mono">NARRATOR_ENABLED=true</span>{" "}
+      (and optionally <span className="font-mono">NARRATOR_MODE=mock</span> to use the
+      template engine without an API key).
+    </div>
+  );
+}
+
+
+function WhatsAppDisabledCallout() {
   return (
     <div className="text-sm p-3 bg-amber-bg border border-rule rounded-md text-amber-fg">
       <span className="font-semibold">WhatsApp delivery is disabled in this environment.</span>{" "}
-      An admin needs to set <span className="font-mono">WHATSAPP_ENABLED=1</span>{" "}
+      An admin needs to set <span className="font-mono">WHATSAPP_ENABLED=true</span>{" "}
       after the WABA sender is provisioned. Narration generation still works —
-      you can review the draft copy without sending.
+      you can review and download the PDF draft without sending.
     </div>
   );
 }
