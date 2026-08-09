@@ -52,13 +52,27 @@ jobs:
             alembic upgrade head
           '
 
-      - name: Run pytest (dev extras installed inline; --rm discards the
-              container layer so they must be installed in the same shell)
+      - name: Run pytest with coverage
         run: |
-          docker compose run --rm -T backend sh -c '
-            pip install -q -e ".[dev]" &&
-            pytest --timeout=30 --tb=line -q
-          '
+          docker compose run --rm -T \
+            -v "$PWD/backend/coverage:/app/coverage" \
+            backend sh -c '
+              pip install -q -e ".[dev]" &&
+              pytest --timeout=30 --tb=short -q \
+                     --cov=app \
+                     --cov-report=term-missing \
+                     --cov-report=html:/app/coverage/html \
+                     --cov-fail-under=75
+            '
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage/html
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Compose logs on failure
         if: failure()

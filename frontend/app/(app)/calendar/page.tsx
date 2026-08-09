@@ -14,6 +14,8 @@ import { EmptyState } from "@/components/EmptyState";
 import { SkeletonTable } from "@/components/Skeleton";
 import { PageHeader } from "@/components/PageHeader";
 import type { CalendarResponse, CalendarRow } from "@/lib/types";
+import { StateChip } from "@/components/atoms";
+import { gstStateName } from "@/lib/gst-state-codes";
 
 
 type Bucket = "overdue" | "this_week" | "next_week" | "later";
@@ -33,24 +35,6 @@ function bucketOf(days_out: number): Bucket {
 }
 
 
-function statusPill(status: CalendarRow["filing_status"]) {
-  const map: Record<string, { label: string; cls: string }> = {
-    draft:    { label: "Draft",    cls: "bg-amber-bg text-amber-fg" },
-    approved: { label: "Approved", cls: "bg-accent-tint text-accent" },
-    filed:    { label: "Filed",    cls: "bg-green-bg text-green-fg" },
-  };
-  const s = status ? map[status] : null;
-  if (!s) {
-    return (
-      <span className="text-xs text-ink-muted">Not started</span>
-    );
-  }
-  return (
-    <span className={`text-xs font-semibold px-2 py-0.5 rounded-sm ${s.cls}`}>
-      {s.label}
-    </span>
-  );
-}
 
 
 function daysCell(days: number) {
@@ -133,19 +117,24 @@ export default function CalendarPage() {
         key: "gstin",
         header: "GSTIN",
         cell: (r) => (
-          <Link
-            href={`/workspace/${r.gstin_profile_id}`}
-            className="font-mono text-xs text-accent hover:text-accent-hover hover:underline"
-          >
-            {r.gstin}
-          </Link>
+          <div className="flex flex-col gap-0.5">
+            <Link
+              href={`/workspace/${r.gstin_profile_id}`}
+              className="font-mono text-xs text-accent hover:text-accent-hover hover:underline"
+            >
+              {r.gstin}
+            </Link>
+            <span className="text-[10px] text-ink-muted leading-none">
+              {gstStateName(r.gstin)}
+            </span>
+          </div>
         ),
         width: "12rem",
       },
       {
         key: "status",
         header: "Status",
-        cell: (r) => statusPill(r.filing_status),
+        cell: (r) => <StateChip status={r.filing_status} />,
         width: "7rem",
       },
       {

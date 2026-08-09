@@ -291,21 +291,63 @@ def _months_back(year: int, month: int, n: int) -> tuple[int, int]:
     return divmod(total, 12)[0], divmod(total, 12)[1] + 1
 
 
+def _trailing_recon_summaries(
+    session: Session,
+    gstin_profile_id,
+    period: str,
+    n: int = TRAILING_MONTHS,
+) -> list[dict]:
+    """Latest completed reconciliation_run summary for each of the n periods
+    before ``period``. Returns an empty list for any period with no run."""
+    y, m = int(period[:4]), int(period[4:])
+    summaries: list[dict] = []
+    for offset in range(1, n + 1):
+        ty, tm = _months_back(y, m, offset)
+        tp = f"{ty:04d}{tm:02d}"
+        row = session.execute(
+            text(
+                "SELECT summary FROM reconciliation_run "
+                "WHERE gstin_profile_id = :g AND period = :p "
+                "  AND status = 'completed' "
+                "ORDER BY created_at DESC LIMIT 1"
+            ),
+            {"g": str(gstin_profile_id), "p": tp},
+        ).mappings().first()
+        if row:
+            summaries.append(dict(row["summary"]))
+    return summaries
+
+
 def _supplier_risk_paise(
     session: Session,
     gstin_profile_id,
     period: str,
     summary: dict,
 ) -> tuple[int, int]:
-    """Simplification for P1: 'risky' = any supplier that appears in the
-    CURRENT period's supplier_default top_suppliers list. Trailing-window
-    history is a TODO — see rule_pack notes.
+    """A supplier is 'risky' if it appears in the current period's
+    supplier_default list OR in 2+ of the trailing 3 periods (chronic
+    defaulter pattern). The union of both sets drives the paise tally.
     """
-    risky_gstins = {
-        entry.get("supplier_gstin", "")
-        for entry in summary.get("supplier_default", {}).get("top_suppliers", [])
-        if entry.get("supplier_gstin")
-    }
+    def _top_sup_gstins(s: dict) -> set[str]:
+        return {
+            e.get("supplier_gstin", "")
+            for e in s.get("supplier_default", {}).get("top_suppliers", [])
+            if e.get("supplier_gstin")
+        }
+
+    # Current period — always risky.
+    risky_gstins: set[str] = _top_sup_gstins(summary)
+
+    # Trailing 3 periods: count how many periods each supplier appeared in.
+    trailing_summaries = _trailing_recon_summaries(session, gstin_profile_id, period)
+    appearance: dict[str, int] = {}
+    for ts in trailing_summaries:
+        for gstin in _top_sup_gstins(ts):
+            appearance[gstin] = appearance.get(gstin, 0) + 1
+
+    # Chronic = defaulted in 2+ of the last 3 periods.
+    chronic = {g for g, count in appearance.items() if count >= 2}
+    risky_gstins |= chronic
     y, m = int(period[:4]), int(period[4:])
     total = int(
         session.execute(

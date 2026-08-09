@@ -1,0 +1,43 @@
+# ── Stage 1: production dependencies ─────────────────────────────────────────
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund --omit=dev
+
+# ── Stage 2: build ────────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+WORKDIR /app
+# Full install (includes TypeScript / ESLint needed by next build)
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY . .
+# API base URL is baked into the JS bundle at build time.
+# Pass the real origin at image build: --build-arg NIYAM_API_BASE=https://api.niyam.ai
+ARG NIYAM_API_BASE=http://localhost:8000
+ENV NIYAM_API_BASE=$NIYAM_API_BASE
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# ── Stage 3: minimal runtime ──────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Non-root user
+RUN addgroup --system --gid 1001 nodejs \
+ && adduser  --system --uid 1001 nextjs
+
+# Only the artefacts npm start needs
+COPY --from=builder /app/package.json        ./
+COPY --from=deps    /app/node_modules        ./node_modules
+COPY --from=builder /app/public              ./public
+COPY --from=builder --chown=nextjs:nodejs \
+                    /app/.next               ./.next
+# next.config.mjs read at start time
+COPY --from=builder /app/next.config.mjs     ./
+
+USER nextjs
+EXPOSE 3000
+ENV PORT=3000
+CMD ["npm", "start"]

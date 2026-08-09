@@ -9,8 +9,6 @@ import { formatPeriod, formatTimestampIN } from "@/lib/format-date";
 
 
 type UnifiedRow = {
-  // 'upload' = user-uploaded file (import_job); 'gsp_api' = live GSP pull
-  // (gsp_pull_attempt). Same table, labeled by source.
   source_kind: "upload" | "gsp_api";
   id: string;
   label: string;
@@ -131,35 +129,6 @@ export default function ImportsPage() {
       numeric: true,
       width: "13rem",
     },
-    {
-      key: "actions",
-      header: "",
-      cell: (j) => {
-        if (j.source_kind === "upload" && j.rejected_rows > 0) {
-          return (
-            <a
-              href={`${process.env.NIYAM_API_BASE || "http://localhost:8000"}/imports/${j.id}/errors.csv`}
-              className="text-accent hover:text-accent-hover hover:underline text-xs font-semibold"
-            >
-              Download errors.csv
-            </a>
-          );
-        }
-        if (j.source_kind === "gsp_api" && j.status === "failed") {
-          return (
-            <span
-              className="text-xs text-red-fg font-mono"
-              title={j.error_message || j.error_kind || ""}
-            >
-              {j.error_kind || "error"}
-            </span>
-          );
-        }
-        return null;
-      },
-      align: "right",
-      width: "13rem",
-    },
   ];
 
   return (
@@ -168,55 +137,6 @@ export default function ImportsPage() {
         title="Imports"
         context="Upload purchase / sales registers or GSTR-2B JSON. Files are queued; rejects come back as a downloadable CSV."
       />
-
-      <section className="bg-paper-raised border border-rule rounded-md p-6 space-y-4 max-w-[560px]">
-        <label className="block">
-          <span className="text-sm font-semibold text-ink">GSTIN profile ID</span>
-          <input
-            className={"mt-1 w-full font-mono " + inputCls}
-            value={gid}
-            onChange={(e) => setGid(e.target.value)}
-            placeholder="uuid"
-          />
-        </label>
-
-        <form
-          className="flex items-center gap-3 flex-wrap"
-          onSubmit={(e) => uploadInvoices(e, "purchase")}
-        >
-          <input type="file" name="file" required className="text-sm" />
-          <button className={btnPrimaryCls}>Upload purchase register</button>
-        </form>
-
-        <form
-          className="flex items-center gap-3 flex-wrap"
-          onSubmit={(e) => uploadInvoices(e, "sale")}
-        >
-          <input type="file" name="file" required className="text-sm" />
-          <button className={btnPrimaryCls}>Upload sales register</button>
-        </form>
-
-        <form className="flex items-center gap-3 flex-wrap" onSubmit={upload2b}>
-          <input type="file" name="file" required accept=".json,application/json" className="text-sm" />
-          <input
-            type="text"
-            name="period"
-            required
-            pattern="[0-9]{6}"
-            placeholder="e.g. 202607"
-            aria-label="Period (six-digit YYYYMM, e.g. 202607 for July 2026)"
-            title="Six digits: YYYYMM. Example: 202607 = July 2026."
-            className={"font-mono w-36 " + inputCls}
-          />
-          <button className={btnPrimaryCls}>Upload GSTR-2B JSON</button>
-          <span
-            className="text-xs text-ink-muted italic"
-            title="Live GSP pulls are triggered from a client's workspace via the Connections panel — they land in this same list, labeled Live GSP pull."
-          >
-            Live GSP pulls happen from the client workspace.
-          </span>
-        </form>
-      </section>
 
       {message && (
         <p
@@ -231,23 +151,123 @@ export default function ImportsPage() {
         </p>
       )}
 
-      <section>
-        <h2 className="text-sm font-semibold text-ink mb-2">Recent jobs</h2>
-        {jobs === null && <SkeletonTable rows={4} cols={6} />}
-        {jobs !== null && (
-          <DataTable
-            columns={columns}
-            rows={jobs}
-            rowKey={(j) => j.id}
-            emptyState={
-              <EmptyState
-                title="No imports yet"
-                body="Upload a purchase or sales register (CSV/XLSX), or a GSTR-2B JSON, to start a background job. Completed jobs appear here with per-row accept/reject counts and a downloadable error report."
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6 items-start">
+        {/* Intake column */}
+        <aside className="bg-paper-raised border border-rule rounded-md overflow-hidden">
+          <div className="px-6 py-3 border-b border-rule bg-paper">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              Intake
+            </h2>
+          </div>
+          <div className="p-6 space-y-4">
+            <label className="block">
+              <span className="text-sm font-semibold text-ink">GSTIN profile ID</span>
+              <input
+                className={"mt-1 w-full font-mono " + inputCls}
+                value={gid}
+                onChange={(e) => setGid(e.target.value)}
+                placeholder="uuid"
               />
-            }
-          />
-        )}
-      </section>
+            </label>
+
+            <form
+              className="flex items-center gap-3 flex-wrap"
+              onSubmit={(e) => uploadInvoices(e, "purchase")}
+            >
+              <input type="file" name="file" required className="text-sm" />
+              <button className={btnPrimaryCls}>Upload purchase register</button>
+            </form>
+
+            <form
+              className="flex items-center gap-3 flex-wrap"
+              onSubmit={(e) => uploadInvoices(e, "sale")}
+            >
+              <input type="file" name="file" required className="text-sm" />
+              <button className={btnPrimaryCls}>Upload sales register</button>
+            </form>
+
+            <form className="flex items-center gap-3 flex-wrap" onSubmit={upload2b}>
+              <input type="file" name="file" required accept=".json,application/json" className="text-sm" />
+              <input
+                type="text"
+                name="period"
+                required
+                pattern="[0-9]{6}"
+                placeholder="e.g. 202607"
+                aria-label="Period (six-digit YYYYMM, e.g. 202607 for July 2026)"
+                title="Six digits: YYYYMM. Example: 202607 = July 2026."
+                className={"font-mono w-36 " + inputCls}
+              />
+              <button className={btnPrimaryCls}>Upload GSTR-2B JSON</button>
+            </form>
+
+            <p
+              className="text-xs text-ink-muted italic"
+              title="Live GSP pulls are triggered from a client's workspace via the Connections panel — they land in this same list, labeled Live GSP pull."
+            >
+              Live GSP pulls happen from the client workspace.
+            </p>
+          </div>
+        </aside>
+
+        {/* Ledger column */}
+        <section className="bg-paper-raised border border-rule rounded-md overflow-hidden">
+          <div className="px-6 py-3 border-b border-rule bg-paper">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              Recent jobs
+            </h2>
+          </div>
+          {jobs === null && (
+            <div className="p-4">
+              <SkeletonTable rows={4} cols={5} />
+            </div>
+          )}
+          {jobs !== null && (
+            <DataTable
+              columns={columns}
+              rows={jobs}
+              rowKey={(j) => j.id}
+              expandRow={(j) => {
+                const hasError = !!(j.error_message || j.error_kind);
+                const hasRejects = j.source_kind === "upload" && j.rejected_rows > 0;
+                if (!hasError && !hasRejects) return null;
+                return (
+                  <div className="space-y-1 text-xs">
+                    {j.error_message && (
+                      <p className="text-red-fg font-mono whitespace-pre-wrap break-all">
+                        {j.error_message}
+                      </p>
+                    )}
+                    {!j.error_message && j.error_kind && (
+                      <p className="text-red-fg font-mono">{j.error_kind}</p>
+                    )}
+                    {hasRejects && (
+                      <p className="text-ink-muted">
+                        {j.accepted_rows} accepted · {j.rejected_rows} rejected · {j.duplicate_rows} duplicate
+                        {j.rejected_rows > 0 && (
+                          <a
+                            href={`${process.env.NIYAM_API_BASE || "http://localhost:8000"}/imports/${j.id}/errors.csv`}
+                            className="ml-3 text-accent hover:underline font-semibold"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Download errors.csv
+                          </a>
+                        )}
+                      </p>
+                    )}
+                  </div>
+                );
+              }}
+              emptyState={
+                <EmptyState
+                  title="No imports yet"
+                  body="Upload a purchase or sales register (CSV/XLSX), or a GSTR-2B JSON, to start a background job. Completed jobs appear here with per-row accept/reject counts and a downloadable error report."
+                />
+              }
+            />
+          )}
+        </section>
+      </div>
     </>
   );
 }
@@ -255,12 +275,12 @@ export default function ImportsPage() {
 
 function StatusPill({ status }: { status: string }) {
   const map: Record<string, string> = {
-    queued: "bg-grey-bg text-ink-muted",
-    running: "bg-accent-tint text-accent",
-    completed: "bg-green-bg text-green-fg",
-    succeeded: "bg-green-bg text-green-fg",
-    failed: "bg-red-bg text-red-fg",
-    retry_scheduled: "bg-amber-100 text-amber-900",
+    queued:           "bg-grey-bg text-ink-muted",
+    running:          "bg-accent-tint text-accent",
+    completed:        "bg-green-bg text-green-fg",
+    succeeded:        "bg-green-bg text-green-fg",
+    failed:           "bg-red-bg text-red-fg",
+    retry_scheduled:  "bg-amber-bg text-amber-fg",
   };
   const cls = map[status] || "bg-grey-bg text-ink-muted";
   return (

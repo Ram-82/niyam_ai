@@ -138,6 +138,13 @@ export default function ActivityPage() {
     []
   );
 
+  const filterSummary = [
+    entityType && `entity: ${entityType}`,
+    actionPrefix && `action: ${actionPrefix}`,
+  ]
+    .filter(Boolean)
+    .join(" · ") || "all activity";
+
   return (
     <>
       <PageHeader
@@ -150,7 +157,7 @@ export default function ActivityPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-3 items-end mb-4">
+      <div className="flex flex-wrap gap-3 items-end">
         <label className="flex flex-col gap-1">
           <span className="text-xs uppercase tracking-wide text-ink-muted font-semibold">
             Entity type
@@ -187,6 +194,16 @@ export default function ActivityPage() {
         </label>
       </div>
 
+      {/* Visible on screen as a filter summary line; also shown when printing. */}
+      <p className="text-xs text-ink-muted">
+        Showing {filterSummary}
+        <span className="hidden print:inline">
+          {" "}— printed {new Date().toLocaleDateString("en-IN")}
+        </span>
+      </p>
+
+      <div className="mb-4" />
+
       {error && (
         <div className="bg-red-bg text-red-fg border border-rule rounded-md p-3 text-sm mb-4">
           {error}
@@ -207,6 +224,9 @@ export default function ActivityPage() {
           rowKey={(r) => r.id}
           initialSort={{ key: "at", dir: "desc" }}
           rowTestId="audit-row"
+          rowClass={(r) =>
+            r.action.includes(".approve") ? "bg-stamp-tint" : ""
+          }
         />
       )}
     </>

@@ -69,18 +69,101 @@ readinessProbe:
   failureThreshold: 3
 ```
 
+## Database migrations
+
+Alembic manages the schema. Migrations **must run before** the API
+container starts accepting traffic; the app does not auto-migrate.
+
+### Bare VM / docker-compose
+
+Run as a one-shot step in your deploy script before restarting the API:
+
+```bash
+docker run --rm --env-file .env <image> alembic upgrade head
+```
+
+Or with `docker compose`:
+
+```bash
+docker compose run --rm api alembic upgrade head
+docker compose up -d api worker
+```
+
+### Kubernetes
+
+Use an init container on the API Deployment so the rollout blocks until
+the migration succeeds:
+
+```yaml
+initContainers:
+  - name: migrate
+    image: <same-api-image>
+    command: ["alembic", "upgrade", "head"]
+    envFrom:
+      - secretRef:
+          name: niyam-env
+containers:
+  - name: api
+    image: <same-api-image>
+    # ...
+```
+
+This ensures:
+- Migrations complete (or the rollout stalls) before the new pods
+  become ready.
+- The old pods keep serving until the new pods pass readiness; the
+  migration runs exactly once per rollout, not once per replica.
+
+### Multi-step schema changes
+
+For zero-downtime deploys, break backwards-incompatible changes across
+two releases:
+
+1. **Release N** — add the new column / table (nullable or with
+   default). Both old and new code work.
+2. **Release N+1** — backfill data, add the `NOT NULL` constraint, drop
+   the old column. Only new code runs.
+
+## Redis persistence
+
+Redis is used for JWT revocation, login lockout counters, GSP OTP
+cooldowns, and the RQ job queue. In production, data loss on Redis
+restart has concrete consequences:
+
+- **JWT revocation** — a revoked token becomes valid again if its JTI
+  disappears. An attacker with a stolen token could regain access.
+- **RQ queue** — in-flight import jobs are lost; users must re-upload.
+- **Lockout counters** — wiped; brute-force windows reset.
+
+**Required configuration** — enable *at least* AOF (append-only file)
+persistence:
+
+```
+# redis.conf
+appendonly yes
+appendfsync everysec     # 1-second durability window; acceptable for
+                          # auth workloads. Use "always" for maximum
+                          # safety at the cost of write throughput.
+```
+
+RDB snapshots (`save 900 1` etc.) are not sufficient alone — they
+tolerate up to the snapshot interval of data loss. For managed Redis
+(ElastiCache, Upstash, Redis Cloud) enable the AOF-equivalent
+persistence tier in your provider's settings.
+
 ## First-time deploy checklist
 
 1. Provision Postgres 15 and Redis 7. Note the DSNs.
-2. Generate a 32+ byte random `JWT_SECRET`. Store in your secrets
+2. Enable AOF persistence on Redis (see above).
+3. Generate a 32+ byte random `JWT_SECRET`. Store in your secrets
    manager.
-3. If enabling narrator/whatsapp, provision `ANTHROPIC_API_KEY` and
+4. If enabling narrator/whatsapp, provision `ANTHROPIC_API_KEY` and
    `WHATSAPP_*` values.
-4. Populate the deploy-side `.env` from `.env.example`. Point at the
+5. Populate the deploy-side `.env` from `.env.example`. Point at the
    real DBs.
-5. `docker run --rm --env-file .env <image> alembic upgrade head`.
-6. `docker run --rm --env-file .env <image>` — API comes up.
-7. Bootstrap the first firm + admin via a one-shot script (there's no
+6. Run `alembic upgrade head` (see migration section above).
+7. Start the API + worker containers.
+8. Bootstrap the first firm + admin via a one-shot script (there's no
    self-serve signup yet; see Tier 2 roadmap).
 
 ## Log shape
