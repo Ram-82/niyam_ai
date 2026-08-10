@@ -21,6 +21,8 @@ from datetime import date
 from typing import Optional
 
 from app.engines.validation.gstin import (
+    GSTIN_STATE_CODES,
+    has_valid_state_code,
     has_valid_structure,
     is_valid_gstin,
     state_code,
@@ -313,6 +315,36 @@ def r008_future_date(
             message=(
                 f"invoice date {invoice.invoice_date.isoformat()} is in the "
                 f"future (today: {ctx.today.isoformat()})"
+            ),
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# R009 GSTIN_STATE_CODE
+# ---------------------------------------------------------------------------
+
+
+def r009_gstin_state_code(
+    invoice: CanonicalInvoice, ctx: ValidationContext
+) -> Optional[Flag]:
+    """counterparty_gstin first two chars must be a recognised GSTN state/UT
+    code. R001 covers missing GSTINs; R002 covers structural failures — so
+    this rule only runs when the GSTIN passes structure validation.
+    """
+    g = invoice.counterparty_gstin
+    if not g:
+        return None  # R001 handles missing
+    if not has_valid_structure(g):
+        return None  # R002 handles structural failure
+    if not has_valid_state_code(g):
+        return Flag(
+            rule_code="R009",
+            severity="error",
+            message=(
+                f"counterparty GSTIN {g!r} has unrecognised state code "
+                f"{g[:2]!r} — not in the GSTN state/UT master "
+                f"({len(GSTIN_STATE_CODES)} statutory codes)"
             ),
         )
     return None

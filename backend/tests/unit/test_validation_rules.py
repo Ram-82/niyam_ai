@@ -367,6 +367,57 @@ def test_r008_flags_future_date() -> None:
 
 
 # ---------------------------------------------------------------------------
+# R009 GSTIN_STATE_CODE
+# ---------------------------------------------------------------------------
+
+
+SUPPLIER_VALID_CODE = _valid_gstin("27DDDDD1234E4Z")   # Maharashtra — code 27, valid
+
+
+def _bad_state_gstin(state_prefix: str) -> str:
+    """Build a structurally valid GSTIN whose first two chars are
+    ``state_prefix``. The base PAN segment is fixed; only the prefix changes."""
+    base = f"{state_prefix}DDDDD1234E4Z"
+    return base + compute_check_digit(base)
+
+
+def test_r009_passes_for_valid_state_code() -> None:
+    inv = _inv(counterparty_gstin=SUPPLIER_VALID_CODE)
+    assert rules.r009_gstin_state_code(inv, _ctx()) is None
+
+
+def test_r009_flags_unrecognised_state_code() -> None:
+    """State code 28 is not in the GSTN master (post-AP-bifurcation)."""
+    bad_gstin = _bad_state_gstin("28")
+    inv = _inv(counterparty_gstin=bad_gstin)
+    flag = rules.r009_gstin_state_code(inv, _ctx())
+    assert flag is not None
+    assert flag.rule_code == "R009"
+    assert flag.severity == "error"
+    assert "28" in flag.message
+
+
+def test_r009_skips_missing_gstin() -> None:
+    """R001 owns the missing-GSTIN case; R009 must not double-flag."""
+    inv = _inv(counterparty_gstin=None)
+    assert rules.r009_gstin_state_code(inv, _ctx()) is None
+
+
+def test_r009_skips_structurally_invalid_gstin() -> None:
+    """R002 owns format failures; R009 skips them to avoid noise."""
+    inv = _inv(counterparty_gstin="NOTVALIDGSTIN!!")
+    assert rules.r009_gstin_state_code(inv, _ctx()) is None
+
+
+def test_r009_all_valid_codes_in_frozenset() -> None:
+    from app.engines.validation.gstin import GSTIN_STATE_CODES
+    spot_check = ["01", "07", "27", "29", "36", "38", "97", "99"]
+    for code in spot_check:
+        assert code in GSTIN_STATE_CODES, f"{code} should be a valid state code"
+    assert "28" not in GSTIN_STATE_CODES
+
+
+# ---------------------------------------------------------------------------
 # Pipeline integration — a single invoice tripping multiple rules at once
 # ---------------------------------------------------------------------------
 

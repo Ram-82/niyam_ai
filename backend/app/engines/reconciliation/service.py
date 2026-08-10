@@ -77,6 +77,9 @@ def reconcile_period(
     result = reconcile(register, b2b, cfg)
 
     with firm_scoped_session(firm_id) as session:
+        cdn_count, cdn_paise = _load_cdn_stats(session, pull_id)
+        result.cdn_count = cdn_count
+        result.cdn_paise = cdn_paise
         _persist_pairs_and_residuals(
             session,
             firm_id=firm_id,
@@ -204,6 +207,27 @@ def _load_b2b(session: Session, gstn_pull_id) -> list[B2BLine]:
             )
         )
     return lines
+
+
+def _load_cdn_stats(session: Session, gstn_pull_id) -> tuple[int, int]:
+    """Return (count, total_paise) for CDN entries in this pull."""
+    row = session.execute(
+        text(
+            """
+            SELECT COUNT(*) AS cnt,
+                   COALESCE(SUM(taxable_value_paise
+                       + (tax_paise_breakdown->>'cgst')::bigint
+                       + (tax_paise_breakdown->>'sgst')::bigint
+                       + (tax_paise_breakdown->>'igst')::bigint
+                       + (tax_paise_breakdown->>'cess')::bigint), 0) AS paise
+            FROM b2b_entry
+            WHERE gstn_pull_id = :pid
+              AND note_type IS NOT NULL
+            """
+        ),
+        {"pid": str(gstn_pull_id)},
+    ).mappings().one()
+    return int(row["cnt"]), int(row["paise"])
 
 
 def _create_run(

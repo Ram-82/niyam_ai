@@ -75,7 +75,21 @@ def is_valid_gstin(gstin: str) -> bool:
     return has_valid_structure(gstin) and has_valid_checksum(gstin)
 
 
+GSTIN_STATE_CODES: frozenset[str] = frozenset({
+    "01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
+    "11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
+    "21", "22", "23", "24", "25", "26", "27", "29", "30", "31",
+    "32", "33", "34", "35", "36", "37", "38", "97", "99",
+})
+"""39 statutory GSTN state/UT codes. 28 is absent: post-bifurcation AP
+moved to 37; legacy 28 GSTINs are no longer issued by GSTN."""
+
+
+def has_valid_state_code(gstin: str) -> bool:
+    """True iff the first two characters are a recognised GSTN state/UT code."""
+    return isinstance(gstin, str) and len(gstin) >= 2 and gstin[:2] in GSTIN_STATE_CODES
+
+
 def state_code(gstin: str) -> str:
-    """First two chars = numeric state code. No validation of the code
-    against the actual state master — that lives in a P2 lookup table."""
+    """First two chars = numeric state code."""
     return gstin[:2]
