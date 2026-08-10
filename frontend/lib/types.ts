@@ -67,6 +67,7 @@ export interface ReconSummary {
     description?: string;
   };
   missing_entry: { count: number; paise: number; description?: string };
+  cdn?: { count: number; paise: number; description?: string };
   disclaimer: string;
 }
 
@@ -114,6 +115,14 @@ export interface MatchResult {
     register_invoice_number?: string;
     register_invoice_date?: string;
     register_total_paise?: number;
+    /** B2B side details populated by list_matches JOIN on b2b_entry. */
+    b2b_invoice_number?: string;
+    b2b_invoice_date?: string;
+    b2b_total_paise?: number;
+    b2b_itc_available?: boolean;
+    /** Set by POST /match-results/{id}/mark-reviewed. */
+    reviewed_at?: string;
+    reviewed_reason?: string;
   };
 }
 
