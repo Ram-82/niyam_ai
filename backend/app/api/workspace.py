@@ -18,6 +18,10 @@ Mutations (either role, RLS-scoped, audited):
       row. The whatsapp gate checks this before allowing a supplier
       chase — step-9 acceptance criterion #2: never chase before the
       CA has reviewed the near-miss list for a plausible match.
+  POST /match-results/{id}/mark-reviewed
+      CA acknowledges a supplier_default or missing_entry without
+      sending a chase. Sets confirmed_by/confirmed_at + context.reviewed_at.
+      Optional body: { "reason": "timing gap / already recorded / etc." }.
   POST /engines/validate  {gstin_profile_id, period}
   POST /engines/reconcile {gstin_profile_id, period}
   POST /engines/score     {gstin_profile_id, return_type, period}
@@ -324,7 +328,17 @@ def list_matches(
         "  COALESCE(i.counterparty_gstin, be.supplier_gstin) AS supplier_gstin, "
         "  i.invoice_number AS register_invoice_number, "
         "  i.invoice_date AS register_invoice_date, "
-        "  i.total_paise AS register_total_paise "
+        "  i.total_paise AS register_total_paise, "
+        "  be.invoice_number AS b2b_invoice_number, "
+        "  be.invoice_date AS b2b_invoice_date, "
+        "  be.itc_available AS b2b_itc_available, "
+        "  CASE WHEN be.id IS NOT NULL THEN "
+        "    COALESCE(be.taxable_value_paise, 0) "
+        "    + COALESCE((be.tax_paise_breakdown->>'cgst')::bigint, 0) "
+        "    + COALESCE((be.tax_paise_breakdown->>'sgst')::bigint, 0) "
+        "    + COALESCE((be.tax_paise_breakdown->>'igst')::bigint, 0) "
+        "    + COALESCE((be.tax_paise_breakdown->>'cess')::bigint, 0) "
+        "  END AS b2b_total_paise "
         "FROM match_result mr "
         "LEFT JOIN invoice i ON i.id = mr.invoice_id "
         "LEFT JOIN b2b_entry be ON be.id = mr.b2b_entry_id "
@@ -337,6 +351,9 @@ def list_matches(
     sql += " ORDER BY mr.bucket, mr.confidence DESC"
     rows = session.execute(text(sql), params).mappings().all()
 
+    def _isodate(v: Any) -> str:
+        return v.isoformat() if hasattr(v, "isoformat") else str(v)
+
     out: list[MatchRow] = []
     for r in rows:
         ctx = dict(r["context"] or {})
@@ -348,13 +365,17 @@ def list_matches(
         if r["register_invoice_number"] and "register_invoice_number" not in ctx:
             ctx["register_invoice_number"] = r["register_invoice_number"]
         if r["register_invoice_date"] and "register_invoice_date" not in ctx:
-            ctx["register_invoice_date"] = (
-                r["register_invoice_date"].isoformat()
-                if hasattr(r["register_invoice_date"], "isoformat")
-                else str(r["register_invoice_date"])
-            )
+            ctx["register_invoice_date"] = _isodate(r["register_invoice_date"])
         if r["register_total_paise"] is not None and "register_total_paise" not in ctx:
             ctx["register_total_paise"] = int(r["register_total_paise"])
+        if r["b2b_invoice_number"] and "b2b_invoice_number" not in ctx:
+            ctx["b2b_invoice_number"] = r["b2b_invoice_number"]
+        if r["b2b_invoice_date"] and "b2b_invoice_date" not in ctx:
+            ctx["b2b_invoice_date"] = _isodate(r["b2b_invoice_date"])
+        if r["b2b_total_paise"] is not None and "b2b_total_paise" not in ctx:
+            ctx["b2b_total_paise"] = int(r["b2b_total_paise"])
+        if r["b2b_itc_available"] is not None and "b2b_itc_available" not in ctx:
+            ctx["b2b_itc_available"] = bool(r["b2b_itc_available"])
         out.append(
             MatchRow(
                 id=r["id"],
@@ -522,6 +543,87 @@ def mark_near_miss_reviewed(
     return {
         "id": str(match_id),
         "near_miss_reviewed_at": reviewed_at.isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Match override: mark-reviewed (supplier_default / missing_entry)
+# ---------------------------------------------------------------------------
+
+
+class MarkReviewedBody(BaseModel):
+    reason: Optional[str] = Field(None, max_length=200)
+
+
+@router.post(
+    "/match-results/{match_id}/mark-reviewed",
+    status_code=status.HTTP_200_OK,
+)
+def mark_match_reviewed(
+    match_id: uuid.UUID,
+    body: Optional[MarkReviewedBody] = None,
+    user: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> dict[str, Any]:
+    """CA acknowledges a supplier_default or missing_entry without chasing.
+
+    Sets ``confirmed_by`` / ``confirmed_at`` to record who reviewed it and
+    writes ``context.reviewed_at`` (ISO-8601) plus optional
+    ``context.reviewed_reason``. Idempotent: re-calling overwrites the
+    timestamp; every call audits.
+    """
+    row = session.execute(
+        text(
+            "SELECT bucket::text AS bucket, confirmed_at "
+            "FROM match_result WHERE id = :id"
+        ),
+        {"id": str(match_id)},
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="match not found")
+    if row["bucket"] not in ("supplier_default", "missing_entry"):
+        raise HTTPException(
+            status_code=400,
+            detail="mark-reviewed only applies to supplier_default and missing_entry rows",
+        )
+    reviewed_at = datetime.now(tz=timezone.utc)
+    import json as _json
+    reason = (body.reason if body else None) or None
+    patch_data: dict = {"reviewed_at": reviewed_at.isoformat()}
+    if reason:
+        patch_data["reviewed_reason"] = reason
+    ctx_patch = _json.dumps(patch_data)
+    session.execute(
+        text(
+            "UPDATE match_result "
+            "SET confirmed_by = :u, confirmed_at = :t, "
+            "    context = context || CAST(:patch AS JSONB) "
+            "WHERE id = :id"
+        ),
+        {
+            "id": str(match_id),
+            "u": str(user.id),
+            "t": reviewed_at,
+            "patch": ctx_patch,
+        },
+    )
+    audit.record(
+        session,
+        firm_id=user.firm_id,
+        actor_user_id=user.id,
+        action="match.reviewed",
+        entity_type="match_result",
+        entity_id=match_id,
+        metadata={
+            "bucket": row["bucket"],
+            "reviewed_at": reviewed_at.isoformat(),
+            "reason": reason,
+        },
+    )
+    return {
+        "id": str(match_id),
+        "reviewed_at": reviewed_at.isoformat(),
+        "reason": reason,
     }
 
 

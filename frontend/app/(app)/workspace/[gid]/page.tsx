@@ -261,6 +261,35 @@ function ReconciliationTab({ gid, period }: { gid: string; period: string }) {
     }
   }
 
+  async function markReviewed(id: string, reason?: string) {
+    try {
+      await api(`/match-results/${id}/mark-reviewed`, {
+        method: "POST",
+        body: { reason: reason ?? null },
+      });
+      setMessage("Row marked as reviewed.");
+      setMatches((prev) =>
+        prev
+          ? prev.map((m) =>
+              m.id === id
+                ? {
+                    ...m,
+                    confirmed_at: new Date().toISOString(),
+                    context: {
+                      ...m.context,
+                      reviewed_at: new Date().toISOString(),
+                      ...(reason ? { reviewed_reason: reason } : {}),
+                    },
+                  }
+                : m,
+            )
+          : prev,
+      );
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : String(e));
+    }
+  }
+
   if (!recon) return <SkeletonTable rows={2} cols={4} />;
   if (!recon.run_id) {
     return (
@@ -287,6 +316,11 @@ function ReconciliationTab({ gid, period }: { gid: string; period: string }) {
           (b) => {
             const isSelected = bucket === b;
             const tint = bucketTint[b];
+            const bucketData = (s as any)[b] ?? {};
+            const paise =
+              b === "matched" || b === "probable"
+                ? (bucketData.paise_claimable ?? bucketData.paise ?? 0)
+                : (bucketData.paise ?? 0);
             return (
               <button
                 key={b}
@@ -306,19 +340,35 @@ function ReconciliationTab({ gid, period }: { gid: string; period: string }) {
                   {BUCKET_LABELS[b]}
                 </div>
                 <div className="text-xl font-mono font-semibold mt-2 text-ink">
-                  {(s as any)[b]?.count ?? 0}
+                  {bucketData.count ?? 0}
                 </div>
                 <div className="text-xs mt-1">
-                  <ITCCell paise={(s as any)[b]?.paise ?? 0} />
+                  <ITCCell paise={paise} />
                 </div>
+                {(b === "matched" || b === "probable") &&
+                  (bucketData.paise_not_available ?? 0) > 0 && (
+                    <div className="text-xs mt-1 text-amber-fg font-semibold">
+                      +<ITCCell paise={bucketData.paise_not_available} /> blocked
+                    </div>
+                  )}
               </button>
             );
           }
         )}
       </div>
 
+      {/* CDN informational callout */}
+      {(s as any).cdn?.count > 0 && (
+        <div className="text-xs bg-paper-raised border border-rule rounded-md px-3 py-2 text-ink-muted">
+          <span className="font-semibold text-ink">{(s as any).cdn.count}</span> credit/debit note
+          {(s as any).cdn.count !== 1 ? "s" : ""} found in 2B (
+          <ITCCell paise={(s as any).cdn.paise} />
+          ) — not yet applied to ITC. Full CDN adjustment is a P2 feature.
+        </div>
+      )}
+
       <p className="text-xs text-ink">
-        All ITC figures shown above and below:{" "}
+        Claimable ITC figures shown above and below:{" "}
         <span className="font-semibold">{CDN_DISCLAIMER}</span>.
       </p>
 
@@ -331,6 +381,7 @@ function ReconciliationTab({ gid, period }: { gid: string; period: string }) {
             bucket={bucket}
             onConfirm={confirm}
             onReject={reject}
+            onMarkReviewed={markReviewed}
             onMatchContextPatch={(matchId, patch) =>
               setMatches((prev) =>
                 prev
@@ -355,15 +406,14 @@ function MatchesList({
   bucket,
   onConfirm,
   onReject,
+  onMarkReviewed,
   onMatchContextPatch,
 }: {
   matches: MatchResult[];
   bucket: Bucket;
   onConfirm: (id: string) => void;
   onReject: (id: string) => void;
-  /** Patch a specific match's ``context`` in the parent's local list
-   * so a mark-reviewed / send-chase side effect surfaces without a
-   * full refetch. Optional. */
+  onMarkReviewed: (id: string, reason?: string) => void;
   onMatchContextPatch?: (
     matchId: string,
     patch: Partial<MatchResult["context"]>,
@@ -379,55 +429,190 @@ function MatchesList({
   return (
     <div className="space-y-3">
       {matches.map((m) => (
-        <div key={m.id} className="border border-rule rounded-md p-3 bg-paper">
-          <div className="flex items-center gap-3 text-sm flex-wrap">
-            <span className="font-mono text-xs text-ink-muted">
-              {m.id.slice(0, 8)}…
-            </span>
-            <span className="text-ink-muted">
-              confidence <span className="font-mono">{m.confidence.toFixed(2)}</span>
-            </span>
-            {m.rejected && (
-              <span className="text-xs text-red-fg bg-red-bg px-1.5 py-0.5 rounded-sm font-semibold">
-                rejected
-              </span>
-            )}
-            <span className="ml-auto flex gap-2">
-              {bucket === "probable" && !m.confirmed_at && !m.rejected && (
-                <>
-                  <button
-                    onClick={() => onConfirm(m.id)}
-                    className="px-3 py-1 text-xs bg-accent text-paper-raised font-semibold rounded-sm hover:bg-accent-hover transition-colors duration-fast"
-                    data-testid="confirm-match"
-                  >
-                    Confirm
-                  </button>
-                  <button
-                    onClick={() => onReject(m.id)}
-                    className="px-3 py-1 text-xs bg-paper-raised border border-rule text-ink rounded-sm hover:border-rule-strong transition-colors duration-fast"
-                  >
-                    Reject
-                  </button>
-                </>
-              )}
-            </span>
-          </div>
-
-          {bucket === "supplier_default" && (
-            <div className="mt-3">
-              <SupplierChasePanel
-                match={m}
-                onLocalUpdate={
-                  onMatchContextPatch
-                    ? (patch) => onMatchContextPatch(m.id, patch)
-                    : undefined
-                }
-              />
-            </div>
-          )}
-        </div>
+        <MatchRow
+          key={m.id}
+          match={m}
+          bucket={bucket}
+          onConfirm={onConfirm}
+          onReject={onReject}
+          onMarkReviewed={onMarkReviewed}
+          onMatchContextPatch={onMatchContextPatch}
+        />
       ))}
     </div>
+  );
+}
+
+
+function MatchRow({
+  match: m,
+  bucket,
+  onConfirm,
+  onReject,
+  onMarkReviewed,
+  onMatchContextPatch,
+}: {
+  match: MatchResult;
+  bucket: Bucket;
+  onConfirm: (id: string) => void;
+  onReject: (id: string) => void;
+  onMarkReviewed: (id: string, reason?: string) => void;
+  onMatchContextPatch?: (id: string, patch: Partial<MatchResult["context"]>) => void;
+}) {
+  const ctx = m.context;
+  const isReviewed = !!ctx.reviewed_at || !!m.confirmed_at;
+  const itcBlocked = ctx.b2b_itc_available === false;
+
+  return (
+    <div
+      className={
+        "border rounded-md p-3 " +
+        (m.rejected
+          ? "border-red-fg/30 bg-red-bg"
+          : isReviewed && bucket !== "probable"
+            ? "border-green-fg/30 bg-green-bg"
+            : "border-rule bg-paper")
+      }
+      data-testid={`match-row-${m.id}`}
+    >
+      {/* Header row: supplier + status badges */}
+      <div className="flex items-start gap-2 flex-wrap mb-2">
+        <span className="font-mono text-xs font-semibold text-ink">
+          {ctx.supplier_gstin ?? "—"}
+        </span>
+        {m.rejected && (
+          <span className="text-xs text-red-fg bg-red-bg border border-red-fg/30 px-1.5 py-0.5 rounded-sm font-semibold">
+            rejected
+          </span>
+        )}
+        {bucket === "probable" && m.confirmed_at && !m.rejected && (
+          <span className="text-xs text-green-fg bg-green-bg border border-green-fg/30 px-1.5 py-0.5 rounded-sm font-semibold">
+            confirmed
+          </span>
+        )}
+        {(bucket === "supplier_default" || bucket === "missing_entry") && isReviewed && (
+          <span className="text-xs text-green-fg bg-green-bg border border-green-fg/30 px-1.5 py-0.5 rounded-sm font-semibold">
+            reviewed
+          </span>
+        )}
+        {bucket === "matched" && itcBlocked && (
+          <span className="text-xs text-amber-fg bg-amber-bg px-1.5 py-0.5 rounded-sm font-semibold">
+            ITC blocked
+          </span>
+        )}
+        {bucket === "probable" && (
+          <span className="text-xs text-ink-muted ml-auto font-mono">
+            confidence {m.confidence.toFixed(2)}
+          </span>
+        )}
+      </div>
+
+      {/* Invoice detail rows */}
+      <div className="grid grid-cols-[4rem_1fr] gap-x-3 gap-y-1 text-xs mb-3">
+        {/* Register side */}
+        {ctx.register_invoice_number && (
+          <>
+            <span className="text-ink-muted font-semibold pt-0.5">Register</span>
+            <InvoiceLine
+              number={ctx.register_invoice_number}
+              date={ctx.register_invoice_date}
+              paise={ctx.register_total_paise}
+            />
+          </>
+        )}
+        {/* 2B side */}
+        {ctx.b2b_invoice_number && (
+          <>
+            <span className="text-ink-muted font-semibold pt-0.5">2B</span>
+            <InvoiceLine
+              number={ctx.b2b_invoice_number}
+              date={ctx.b2b_invoice_date}
+              paise={ctx.b2b_total_paise}
+              itcBlocked={itcBlocked}
+            />
+          </>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {bucket === "probable" && !m.confirmed_at && !m.rejected && (
+          <>
+            <button
+              onClick={() => onConfirm(m.id)}
+              className="px-3 py-1 text-xs bg-accent text-paper-raised font-semibold rounded-sm hover:bg-accent-hover transition-colors duration-fast"
+              data-testid="confirm-match"
+            >
+              Confirm match
+            </button>
+            <button
+              onClick={() => onReject(m.id)}
+              className="px-3 py-1 text-xs bg-paper-raised border border-rule text-ink rounded-sm hover:border-rule-strong transition-colors duration-fast"
+            >
+              Reject
+            </button>
+          </>
+        )}
+        {(bucket === "supplier_default" || bucket === "missing_entry") && !isReviewed && (
+          <button
+            onClick={() => onMarkReviewed(m.id)}
+            className="px-3 py-1 text-xs bg-paper-raised border border-rule text-ink rounded-sm hover:border-rule-strong transition-colors duration-fast"
+            data-testid="mark-reviewed"
+          >
+            Mark reviewed
+          </button>
+        )}
+        {ctx.reviewed_reason && (
+          <span className="text-xs text-ink-muted italic">
+            {ctx.reviewed_reason}
+          </span>
+        )}
+      </div>
+
+      {/* Supplier chase panel for supplier_default */}
+      {bucket === "supplier_default" && (
+        <div className="mt-3">
+          <SupplierChasePanel
+            match={m}
+            onLocalUpdate={
+              onMatchContextPatch
+                ? (patch) => onMatchContextPatch(m.id, patch)
+                : undefined
+            }
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function InvoiceLine({
+  number,
+  date,
+  paise,
+  itcBlocked,
+}: {
+  number: string;
+  date?: string;
+  paise?: number;
+  itcBlocked?: boolean;
+}) {
+  return (
+    <span className={itcBlocked ? "text-amber-fg" : "text-ink"}>
+      <span className="font-mono">{number}</span>
+      {date && (
+        <span className="text-ink-muted ml-2">{formatDateIN(date)}</span>
+      )}
+      {paise !== undefined && (
+        <span className="ml-2">
+          <ITCCell paise={paise} />
+        </span>
+      )}
+      {itcBlocked && (
+        <span className="ml-1 text-amber-fg">(blocked)</span>
+      )}
+    </span>
   );
 }
 
