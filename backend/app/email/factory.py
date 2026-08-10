@@ -14,6 +14,7 @@ from app.email.transport import (
     EmailTransport,
     MemoryTransport,
     NoopTransport,
+    SMTPTransport,
 )
 
 
@@ -28,11 +29,20 @@ def _build() -> EmailTransport:
         return ConsoleTransport()
     if mode == "memory":
         return MemoryTransport()
-    # SMTP / SES land in follow-up slices; explicit error beats
+    if mode == "smtp":
+        return SMTPTransport(
+            host=settings.smtp_host,
+            port=settings.smtp_port,
+            username=settings.smtp_username,
+            password=settings.smtp_password,
+            use_tls=settings.smtp_use_tls,
+            use_starttls=settings.smtp_use_starttls,
+        )
+    # SES / Resend / Postmark land in follow-up slices; explicit error beats
     # silently no-oping and losing outbound mail.
     raise RuntimeError(
         f"email_mode={settings.email_mode!r} is not implemented yet. "
-        "Set EMAIL_ENABLED=false or EMAIL_MODE=console."
+        "Supported modes: console, smtp. Set EMAIL_ENABLED=false to disable."
     )
 
 

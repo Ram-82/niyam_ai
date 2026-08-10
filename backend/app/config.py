@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     # real transport.
     # 'console' → log the email body via observability; no external call.
     # 'memory'  → in-process transport (tests only, records sends).
-    # 'smtp'    → future; will require SMTP host/port/creds.
+    # 'smtp'    → real delivery via SMTP relay (Mailgun, SendGrid, SES SMTP, etc).
     # 'ses'     → future; AWS SES via boto3.
     email_enabled: bool = False
     email_mode: str = "console"
@@ -117,6 +117,19 @@ class Settings(BaseSettings):
     # Public origin the invite / password-reset links point at. In prod
     # this is the CA-facing dashboard URL (e.g. https://app.niyam.ai).
     email_app_base_url: str = "http://localhost:3000"
+
+    # SMTP relay settings — only required when email_mode='smtp'.
+    # Compatible with any SMTP relay: Mailgun, SendGrid, Postmark, AWS SES
+    # (SMTP interface), or a bare Postfix/Exim.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    # smtp_use_tls=True  → implicit TLS (SMTP_SSL), typically port 465.
+    # smtp_use_starttls=True → STARTTLS upgrade, typically port 587 (default).
+    # Set both False for a trusted internal relay on port 25.
+    smtp_use_tls: bool = False
+    smtp_use_starttls: bool = True
 
     # SQLAlchemy connection pool tuning.
     # pool_size × WEB_WORKERS = total persistent connections to Postgres.
@@ -163,6 +176,12 @@ class Settings(BaseSettings):
                 "GSP_BASE_URL still points at the local mock server while gsp_mode='live'. "
                 "Set GSP_BASE_URL to your GSP vendor's endpoint."
             )
+        if self.email_enabled and self.email_mode == "smtp":
+            if not self.smtp_host:
+                raise ValueError(
+                    "SMTP_HOST must be set when email_enabled=true and email_mode='smtp'. "
+                    "Provide the hostname of your SMTP relay (e.g. smtp.mailgun.org)."
+                )
         return self
 
 
