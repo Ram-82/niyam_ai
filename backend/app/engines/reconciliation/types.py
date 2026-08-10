@@ -99,6 +99,8 @@ class Residual:
 class ReconResult:
     pairs: list[MatchPair] = field(default_factory=list)
     residuals: list[Residual] = field(default_factory=list)
+    cdn_count: int = 0
+    cdn_paise: int = 0
 
     def summary(self) -> dict[str, Any]:
         """Bucket counts + paise + top-offending suppliers for supplier_default."""
@@ -187,5 +189,17 @@ class ReconResult:
                     "unrecorded purchase; record before filing"
                 ),
             },
-            "disclaimer": "before credit/debit note adjustments",
+            "cdn": {
+                "count": self.cdn_count,
+                "paise": self.cdn_paise,
+                "description": (
+                    "credit/debit notes from 2B — not yet applied to ITC. "
+                    "Full CDN adjustment is a P2 feature."
+                ),
+            },
+            "disclaimer": (
+                "ITC figures are before credit/debit note adjustments. "
+                f"{self.cdn_count} CDN note(s) parsed from 2B; "
+                "not yet deducted from claimable ITC."
+            ),
         }

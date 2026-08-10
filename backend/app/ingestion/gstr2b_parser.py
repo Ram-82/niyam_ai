@@ -1,4 +1,4 @@
-"""GSTR-2B JSON parser (b2b section only for P1).
+"""GSTR-2B JSON parser (b2b + cdnr sections).
 
 The GSTN 2B JSON is nested and evolves periodically. P1 supports the two
 common shapes seen in production exports:
@@ -6,15 +6,19 @@ common shapes seen in production exports:
     {"data": {"docdata": {"b2b": [{"ctin": ..., "inv": [...]}]}}}
     {"data": {"b2b":       [{"ctin": ..., "inv": [...]}]}}
 
-Each supplier block carries ``ctin`` (supplier GSTIN) and ``inv[]``. Each
-``inv`` carries invoice-level fields + an ``items[]`` list with tax
-breakdown. We sum items to get per-invoice CGST/SGST/IGST/CESS in paise.
+The same nesting applies to the ``cdnr`` (credit/debit notes) section,
+which uses ``nt[]`` instead of ``inv[]`` and carries ``ntty`` ("C"=credit,
+"D"=debit) and ``nt_num``/``nt_dt`` in place of ``inum``/``idt``.
+
+P1 parses both b2b and cdnr and stores them as ``b2b_entry`` rows with
+``note_type=NULL`` (b2b) or ``'credit_note'/'debit_note'`` (cdnr). The
+reconciliation engine skips cdnr rows (``WHERE note_type IS NULL``) — the
+CDN adjustment is informational in P1: the ITC summary is labeled
+"before credit/debit note adjustments."
 
 Not handled in P1:
 
-* ``b2ba`` (amendments), ``cdnr``/``cdnra`` (credit/debit notes) — see the
-  README Domain verification list. Every P1 ITC summary is labeled
-  "before credit/debit note adjustments."
+* ``b2ba`` (amendments), ``cdnra`` (credit/debit note amendments)
 * ``impg`` (imports), ``impgsez``, ``isd`` sections.
 
 Rejects are collected with row-index semantics: for a nested JSON the
@@ -40,6 +44,7 @@ class B2BParseResult:
     period: str | None
     ctin_count: int
     invoice_count: int
+    cdn_note_count: int = 0
 
 
 class SchemaError(Exception):
@@ -54,6 +59,19 @@ def _parse_2b_date(raw: str) -> date:
         except ValueError:
             continue
     raise ValueError(f"invalid date: {raw!r}")
+
+
+def _find_cdnr_section(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the cdnr list, or [] if the section is absent (cdnr is optional)."""
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return []
+    for candidate in (data.get("docdata"), data):
+        if isinstance(candidate, dict):
+            cdnr = candidate.get("cdnr")
+            if isinstance(cdnr, list):
+                return cdnr
+    return []
 
 
 def _find_b2b_section(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -177,12 +195,97 @@ def parse_gstr2b_json(
                 )
             )
 
+    # --- CDNR section (credit / debit notes) --------------------------------
+    cdnr = _find_cdnr_section(payload)
+    cdn_note_count = 0
+    for ci, supplier in enumerate(cdnr):
+        ctin = str(supplier.get("ctin") or "").upper()
+        notes = supplier.get("nt") or []
+        if not ctin or not isinstance(notes, list):
+            rejects.append(
+                RejectedRow(
+                    row_index=ci,
+                    reason="schema",
+                    message="cdnr supplier block missing ctin or nt[]",
+                    raw={"path": f"cdnr[{ci}]", "keys": list(supplier.keys())},
+                )
+            )
+            continue
+        for ni, note in enumerate(notes):
+            cdn_note_count += 1
+            path = f"cdnr[{ci}].nt[{ni}]"
+            ntty = str(note.get("ntty") or "").upper()
+            nt_num = note.get("nt_num")
+            nt_dt = note.get("nt_dt")
+            if not nt_num or not nt_dt or ntty not in ("C", "D"):
+                rejects.append(
+                    RejectedRow(
+                        row_index=cdn_note_count,
+                        reason="missing_required",
+                        message="cdnr note missing nt_num, nt_dt, or ntty (C/D)",
+                        raw={"path": path, "supplier_gstin": ctin},
+                    )
+                )
+                continue
+            try:
+                note_date = _parse_2b_date(nt_dt)
+            except ValueError as e:
+                rejects.append(
+                    RejectedRow(
+                        row_index=cdn_note_count,
+                        reason="bad_date",
+                        message=str(e),
+                        raw={"path": path, "supplier_gstin": ctin},
+                    )
+                )
+                continue
+
+            items = note.get("items") or []
+            try:
+                txval, cgst, sgst, igst, cess = _sum_items_or_invoice(note, items)
+            except ValueError as e:
+                rejects.append(
+                    RejectedRow(
+                        row_index=cdn_note_count,
+                        reason="bad_amount",
+                        message=str(e),
+                        raw={"path": path, "supplier_gstin": ctin},
+                    )
+                )
+                continue
+
+            note_type = "credit_note" if ntty == "C" else "debit_note"
+            itc_flag = str(note.get("itcavl") or "Y").upper() == "Y"
+            ims_action_raw = note.get("imsactn")
+            ims_status_raw = note.get("imsts")
+            ims_action = str(ims_action_raw).strip() if ims_action_raw else None
+            ims_status = str(ims_status_raw).strip() if ims_status_raw else None
+
+            entries.append(
+                CanonicalB2BEntry(
+                    gstn_pull_id=gstn_pull_id,
+                    supplier_gstin=ctin,
+                    invoice_number=str(nt_num),
+                    invoice_date=note_date,
+                    taxable_value_paise=txval,
+                    cgst_paise=cgst,
+                    sgst_paise=sgst,
+                    igst_paise=igst,
+                    cess_paise=cess,
+                    itc_available=itc_flag,
+                    note_type=note_type,
+                    ims_status=ims_status,
+                    ims_action=ims_action,
+                )
+            )
+
     return B2BParseResult(
         entries=entries,
         rejects=rejects,
         period=period,
         ctin_count=len(b2b),
         invoice_count=invoice_count,
+        cdn_note_count=cdn_note_count,
     )
 
 

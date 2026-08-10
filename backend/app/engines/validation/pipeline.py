@@ -19,6 +19,7 @@ from app.engines.validation.rules import (
     r006_tax_arithmetic,
     r007_duplicate_suspect,
     r008_future_date,
+    r009_gstin_state_code,
 )
 from app.engines.validation.types import Flag, ValidationContext
 from app.ingestion.canonical import CanonicalInvoice
@@ -36,6 +37,7 @@ RULES: tuple[RuleFunc, ...] = (
     r006_tax_arithmetic,
     r007_duplicate_suspect,
     r008_future_date,
+    r009_gstin_state_code,
 )
 
 
