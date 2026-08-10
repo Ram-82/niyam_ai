@@ -279,7 +279,11 @@ export function DeliveryPanel({
               Send via WhatsApp
             </button>
             <button
-              onClick={() => previewPdf(panel.narration.narration_run_id)}
+              onClick={() => previewPdf(
+                panel.state === "whatsapp_disabled"
+                  ? panel.narration!.narration_run_id
+                  : panel.narration.narration_run_id
+              )}
               className="px-4 py-2 border border-rule bg-paper text-ink rounded-sm hover:border-rule-strong transition-colors duration-fast"
               data-testid="preview-pdf"
             >

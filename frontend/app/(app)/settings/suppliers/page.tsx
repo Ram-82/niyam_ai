@@ -4,13 +4,10 @@
  * The chase-flow prefill lookup goes against the same table (GET
  * /supplier-contacts/by-gstin/{gstin}). This page is where the CA
  * seeds and maintains the directory before/between chase flows.
- *
- * Kept intentionally minimal: table + search + add form + delete.
- * Full edit is a follow-up (PATCH endpoint is already available).
  */
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { DataTable, type Column } from "@/components/Table";
 import { EmptyState } from "@/components/EmptyState";
@@ -40,6 +37,7 @@ export default function SuppliersPage() {
   const [rows, setRows] = useState<SupplierContactRow[] | null>(null);
   const [q, setQ] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditDraft>({
     name: "",
     whatsapp_number: "",
@@ -109,6 +107,7 @@ export default function SuppliersPage() {
 
   function startEdit(row: SupplierContactRow) {
     setEditingId(row.id);
+    setExpandedKey(row.id);   // auto-open notes panel
     setDraft({
       name: row.name,
       whatsapp_number: row.whatsapp_number ?? "",
@@ -119,6 +118,7 @@ export default function SuppliersPage() {
 
   function cancelEdit() {
     setEditingId(null);
+    setExpandedKey(null);
   }
 
   async function saveEdit(row: SupplierContactRow) {
@@ -141,6 +141,7 @@ export default function SuppliersPage() {
       await api(`/supplier-contacts/${row.id}`, { method: "PATCH", body });
       setMessage({ kind: "ok", text: `Updated ${draft.name || row.name}.` });
       setEditingId(null);
+      setExpandedKey(null);
       refresh();
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
@@ -171,6 +172,33 @@ export default function SuppliersPage() {
   }
 
   const isEditing = (r: SupplierContactRow) => editingId === r.id;
+
+  function expandRow(r: SupplierContactRow): React.ReactNode {
+    if (isEditing(r)) {
+      return (
+        <label className="block">
+          <span className="text-xs uppercase tracking-wide text-ink-muted font-semibold">
+            Notes
+          </span>
+          <textarea
+            value={draft.notes}
+            onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
+            rows={2}
+            placeholder="Payment terms, contact person…"
+            className={
+              inputCls +
+              " w-full mt-1 resize-y font-sans leading-snug"
+            }
+            data-testid="edit-notes"
+          />
+        </label>
+      );
+    }
+    if (!r.notes) return null;
+    return (
+      <p className="text-sm text-ink whitespace-pre-wrap">{r.notes}</p>
+    );
+  }
 
   const columns: Column<SupplierContactRow>[] = [
     {
@@ -402,6 +430,13 @@ export default function SuppliersPage() {
           rows={rows}
           rowKey={(r) => r.id}
           initialSort={{ key: "name", dir: "asc" }}
+          expandRow={expandRow}
+          expandedKey={expandedKey}
+          onExpandedKeyChange={(k) => {
+            // If clicking away from an editing row, don't collapse.
+            if (editingId && k !== editingId) return;
+            setExpandedKey(k);
+          }}
           emptyState={
             <EmptyState
               title="No supplier contacts yet"
