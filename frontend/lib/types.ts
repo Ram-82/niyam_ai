@@ -228,6 +228,23 @@ export interface FirmSettings {
   name: string;
   plan: string;
   reminders_enabled: boolean;
+  admin_whatsapp_number: string | null;
+}
+
+export interface RulePackRow {
+  id: string;
+  version: string;
+  active: boolean;
+  firm_id: string | null;
+  is_global: boolean;
+  notes: string | null;
+  created_at: string | null;
+}
+
+export interface CloneResponse {
+  id: string;
+  version: string;
+  firm_id: string;
 }
 
 export interface Me {

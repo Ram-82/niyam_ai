@@ -163,6 +163,12 @@ export default function SettingsPage() {
         >
           Supplier directory →
         </a>
+        <a
+          href="/settings/rule-pack"
+          className="text-accent hover:text-accent-hover hover:underline font-semibold"
+        >
+          Rule pack →
+        </a>
       </nav>
       {message && (
         <p
@@ -279,10 +285,15 @@ function FirmPreferencesCard() {
   const [settings, setSettings] = useState<FirmSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [waNumber, setWaNumber] = useState("");
+  const [waEditing, setWaEditing] = useState(false);
 
   useEffect(() => {
     api<FirmSettings>("/firm/settings")
-      .then(setSettings)
+      .then((s) => {
+        setSettings(s);
+        setWaNumber(s.admin_whatsapp_number ?? "");
+      })
       .catch((e) => setMsg({ kind: "error", text: `Load failed — ${String(e)}` }));
   }, []);
 
@@ -309,10 +320,31 @@ function FirmPreferencesCard() {
     }
   }
 
+  async function saveWhatsApp() {
+    setSaving(true);
+    setMsg(null);
+    try {
+      const updated = await api<FirmSettings>("/firm/settings", {
+        method: "PATCH",
+        body: { admin_whatsapp_number: waNumber || "" },
+      });
+      setSettings(updated);
+      setWaNumber(updated.admin_whatsapp_number ?? "");
+      setWaEditing(false);
+      setMsg({ kind: "ok", text: "WhatsApp number saved." });
+    } catch (e) {
+      const text = e instanceof ApiError ? e.message : String(e);
+      setMsg({ kind: "error", text: `Save failed — ${text}` });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <section className="space-y-2">
       <h2 className="text-sm font-semibold text-ink">Firm preferences</h2>
-      <div className="bg-paper-raised border border-rule rounded-md p-6 max-w-[720px] space-y-3">
+      <div className="bg-paper-raised border border-rule rounded-md p-6 max-w-[720px] space-y-4">
+        {/* Reminders toggle */}
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-ink">
@@ -338,6 +370,66 @@ function FirmPreferencesCard() {
             </span>
           </label>
         </div>
+
+        {/* WhatsApp admin number */}
+        <div className="border-t border-rule pt-4 space-y-2">
+          <div className="text-sm font-semibold text-ink">Admin WhatsApp number</div>
+          <p className="text-xs text-ink-muted">
+            Automated notifications — reconciliation complete, due-date reminders —
+            are sent to this number. E.164 format (e.g. +919876543210). Leave blank
+            to disable WhatsApp notifications.
+          </p>
+          {waEditing ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={waNumber}
+                onChange={(e) => setWaNumber(e.target.value)}
+                placeholder="+919876543210"
+                className={
+                  "border border-rule bg-paper-raised rounded-sm px-2 py-1 text-sm text-ink " +
+                  "focus-visible:border-accent w-52 font-mono"
+                }
+                data-testid="admin-whatsapp-input"
+              />
+              <button
+                className={
+                  "px-3 py-1 bg-accent text-paper-raised text-xs font-semibold rounded-sm " +
+                  "hover:bg-accent-hover transition-colors disabled:opacity-50"
+                }
+                onClick={saveWhatsApp}
+                disabled={saving}
+              >
+                Save
+              </button>
+              <button
+                className="text-xs text-ink-muted hover:text-ink"
+                onClick={() => {
+                  setWaNumber(settings?.admin_whatsapp_number ?? "");
+                  setWaEditing(false);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <span className="font-mono text-sm text-ink">
+                {settings?.admin_whatsapp_number || (
+                  <span className="text-ink-muted">Not set</span>
+                )}
+              </span>
+              <button
+                className="text-xs text-accent hover:underline"
+                onClick={() => setWaEditing(true)}
+                data-testid="admin-whatsapp-edit"
+              >
+                {settings?.admin_whatsapp_number ? "Edit" : "Add"}
+              </button>
+            </div>
+          )}
+        </div>
+
         {msg && (
           <p
             className={

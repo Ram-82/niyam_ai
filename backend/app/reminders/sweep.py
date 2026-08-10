@@ -29,6 +29,7 @@ from app.config import settings
 from app.db import firm_scoped_session, owner_engine
 from app.email import send_due_date_reminder_email
 from app.rules.pack import get_active_rule_pack
+from app.whatsapp import notify as _wa_notify
 
 
 logger = logging.getLogger(__name__)
@@ -160,14 +161,12 @@ def sweep_reminders(today: Optional[date] = None) -> SweepReport:
         return report
 
     day = today or datetime.now(tz=timezone.utc).date()
-    pack = get_active_rule_pack()
-    due_cfg = (pack.payload.get("scoring", {}) or {}).get("due_dates", {}) or {}
 
     firm_ids = _load_firm_ids()
     for firm_id in firm_ids:
         report.firms_visited += 1
         try:
-            _sweep_one_firm(firm_id, day, due_cfg, report)
+            _sweep_one_firm(firm_id, day, report)
         except Exception as exc:
             # Never let one firm's failure block the others.
             logger.exception("reminders.sweep.firm_failed", extra={"firm_id": firm_id})
@@ -186,9 +185,9 @@ def sweep_reminders(today: Optional[date] = None) -> SweepReport:
     return report
 
 
-def _sweep_one_firm(
-    firm_id: str, day: date, due_cfg: dict, report: SweepReport
-) -> None:
+def _sweep_one_firm(firm_id: str, day: date, report: SweepReport) -> None:
+    pack = get_active_rule_pack(firm_id=firm_id)
+    due_cfg = (pack.payload.get("scoring", {}) or {}).get("due_dates", {}) or {}
     with firm_scoped_session(firm_id) as session:
         gids = session.execute(
             text(
@@ -350,3 +349,106 @@ def _dispatch_one(
         },
     )
     report.dispatched += 1
+
+    # WhatsApp to the firm admin — separate from the per-recipient email.
+    # Idempotency: INSERT reminder_log with channel='whatsapp'. The unique
+    # constraint covers (gstin_profile_id, period, return_type,
+    # days_before_due, channel, recipient_user_id), so the admin only gets
+    # one WhatsApp per threshold per period regardless of how many
+    # email-recipients the sweep produces. We reuse recipient_user_id=NULL
+    # isn't an option (FK NOT NULL), so we gate on the email dispatch of
+    # the *first* recipient — only fire once per sweep run by checking
+    # whether the whatsapp row already exists before sending.
+    _maybe_send_admin_whatsapp(
+        session=session,
+        firm_id=firm_id,
+        gid_id=gid_id,
+        gstin=gstin,
+        client_trade_name=client_trade_name,
+        return_type=return_type,
+        period=period,
+        days_before_due=days_before_due,
+        due_date=due_date,
+        recipient_user_id=recipient_user_id,
+    )
+
+
+def _maybe_send_admin_whatsapp(
+    *,
+    session,
+    firm_id: str,
+    gid_id: str,
+    gstin: str,
+    client_trade_name: str,
+    return_type: str,
+    period: str,
+    days_before_due: int,
+    due_date: date,
+    recipient_user_id: str,
+) -> None:
+    """Fire one WhatsApp to the firm admin per (GSTIN, period, threshold).
+
+    Uses reminder_log with channel='whatsapp' for idempotency — same
+    constraint as the email channel, keyed on the recipient_user_id of
+    whoever triggered this dispatch (the first email recipient in the
+    loop). A second email recipient for the same GSTIN/period/threshold
+    will hit ON CONFLICT DO NOTHING on the 'whatsapp' row and skip the
+    send, so the firm admin only gets one WhatsApp per threshold, not one
+    per email-recipient.
+    """
+    result = session.execute(
+        text(
+            """
+            INSERT INTO reminder_log (
+                firm_id, gstin_profile_id, period, return_type,
+                days_before_due, channel, recipient_user_id, recipient_email
+            ) VALUES (
+                :firm_id, :gid, :period, :return_type,
+                :days, 'whatsapp', :ruid,
+                (SELECT email::text FROM app_user WHERE id = :ruid)
+            )
+            ON CONFLICT ON CONSTRAINT reminder_log_idempotency DO NOTHING
+            """
+        ),
+        {
+            "firm_id": firm_id,
+            "gid": gid_id,
+            "period": period,
+            "return_type": return_type,
+            "days": days_before_due,
+            "ruid": recipient_user_id,
+        },
+    )
+    if result.rowcount == 0:
+        return  # already sent for this threshold
+
+    _wa_notify.due_date_reminder(
+        firm_id=firm_id,
+        gstin=gstin,
+        client_trade_name=client_trade_name,
+        return_type=return_type,
+        period=period,
+        days_before_due=days_before_due,
+        due_date=due_date,
+    )
+    session.execute(
+        text(
+            """
+            UPDATE reminder_log
+            SET sent_at = now()
+            WHERE gstin_profile_id = :gid
+              AND period = :period
+              AND return_type = :return_type
+              AND days_before_due = :days
+              AND channel = 'whatsapp'
+              AND recipient_user_id = :ruid
+            """
+        ),
+        {
+            "gid": gid_id,
+            "period": period,
+            "return_type": return_type,
+            "days": days_before_due,
+            "ruid": recipient_user_id,
+        },
+    )

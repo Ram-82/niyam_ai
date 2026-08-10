@@ -56,7 +56,7 @@ def compute_and_persist(
     period: str,
     today: Optional[date] = None,
 ) -> ScoringRunResult:
-    pack = get_active_rule_pack()
+    pack = get_active_rule_pack(firm_id=firm_id)
     scoring_cfg = pack.payload.get("scoring", {})
     weights = scoring_cfg.get("weights", {})
     due_dates_cfg = scoring_cfg.get("due_dates", {})

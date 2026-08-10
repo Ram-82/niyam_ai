@@ -49,7 +49,7 @@ def validate_period(
 ) -> ValidationRunSummary:
     """Run all P1 rules over every invoice matching (gstin_profile_id,
     invoice_date's YYYYMM == period). Persist flags. Return a summary."""
-    pack = get_active_rule_pack()
+    pack = get_active_rule_pack(firm_id=firm_id)
     tz = ZoneInfo(settings.display_tz)
     _today = today or datetime.now(tz=tz).date()
 

@@ -53,7 +53,7 @@ def reconcile_period(
     gstin_profile_id: uuid.UUID | str,
     period: str,
 ) -> ReconRunResult:
-    pack = get_active_rule_pack()
+    pack = get_active_rule_pack(firm_id=firm_id)
     cfg = _cfg_from_pack(pack.payload)
 
     with firm_scoped_session(firm_id) as session:
@@ -89,6 +89,19 @@ def reconcile_period(
         )
         summary = result.summary()
         _finish_run(session, run_id=run_id, summary=summary)
+        gstin = _gstin_for_profile(session, gstin_profile_id)
+
+    from app.whatsapp import notify as _wa_notify
+    _wa_notify.recon_complete(
+        firm_id=str(firm_id),
+        gstin=gstin,
+        period=period,
+        run_id=str(run_id),
+        matched=summary["matched"]["count"],
+        probable=summary["probable"]["count"],
+        supplier_default=summary["supplier_default"]["count"],
+        missing=summary["missing_entry"]["count"],
+    )
 
     return ReconRunResult(
         run_id=run_id, summary=summary, rule_pack_version=pack.version
@@ -207,6 +220,14 @@ def _load_b2b(session: Session, gstn_pull_id) -> list[B2BLine]:
             )
         )
     return lines
+
+
+def _gstin_for_profile(session: Session, gstin_profile_id) -> str:
+    row = session.execute(
+        text("SELECT gstin FROM gstin_profile WHERE id = :id"),
+        {"id": str(gstin_profile_id)},
+    ).scalar()
+    return str(row) if row else str(gstin_profile_id)
 
 
 def _load_cdn_stats(session: Session, gstn_pull_id) -> tuple[int, int]:
