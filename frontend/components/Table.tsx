@@ -41,6 +41,8 @@ export function DataTable<T>({
   onRowClick,
   expandRow,
   rowClass,
+  expandedKey: controlledExpandedKey,
+  onExpandedKeyChange,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -51,9 +53,14 @@ export function DataTable<T>({
   onRowClick?: (row: T) => void;
   expandRow?: (row: T) => React.ReactNode;
   rowClass?: (row: T) => string;
+  /** Controlled expand — when provided, parent owns which row is open. */
+  expandedKey?: string | null;
+  onExpandedKeyChange?: (key: string | null) => void;
 }) {
   const [sort, setSort] = useState<SortState>(initialSort ?? null);
-  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [internalExpandedKey, setInternalExpandedKey] = useState<string | null>(null);
+  const expandedKey = controlledExpandedKey !== undefined ? controlledExpandedKey : internalExpandedKey;
+  const setExpandedKey = onExpandedKeyChange ?? setInternalExpandedKey;
 
   const sorted = useMemo(() => {
     if (!sort) return rows;
