@@ -16,6 +16,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import QRCode from "qrcode";
 import { setAccessToken } from "@/lib/auth";
 import { ErrorBanner } from "@/components/v2/ui/ErrorBanner";
 import { LoadingState } from "@/components/v2/ui/LoadingState";
@@ -106,6 +107,27 @@ export default function MfaSetupPage() {
   const [verifying, setVerifying] = useState(false);
 
   const [copiedField, setCopiedField] = useState<"secret" | "uri" | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+
+  // Regenerate the QR whenever the provisioning URI changes. Rendered
+  // pure black-on-white so authenticator apps can scan reliably in both
+  // light and dark themes (the surrounding tile handles the background).
+  useEffect(() => {
+    if (!payload?.provisioning_uri) {
+      setQrDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    QRCode.toDataURL(payload.provisioning_uri, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 192,
+      color: { dark: "#000000", light: "#ffffff" },
+    })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => { if (!cancelled) setQrDataUrl(null); });
+    return () => { cancelled = true; };
+  }, [payload?.provisioning_uri]);
 
   // Bootstrap: read token, call setup.
   useEffect(() => {
@@ -235,6 +257,53 @@ export default function MfaSetupPage() {
 
             <StepCard n={2} title="Add this account">
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{
+                  display: "flex", gap: 16, alignItems: "flex-start",
+                  padding: 12,
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  background: "var(--surface)",
+                }}>
+                  <div
+                    aria-label="Scan this QR code with your authenticator app"
+                    style={{
+                      flex: "none",
+                      width: 128, height: 128,
+                      padding: 6,
+                      background: "#ffffff",
+                      borderRadius: 6,
+                      border: "1px solid var(--border)",
+                      display: "grid", placeItems: "center",
+                    }}
+                  >
+                    {qrDataUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={qrDataUrl}
+                        alt="TOTP QR code"
+                        width={116}
+                        height={116}
+                        style={{ display: "block" }}
+                      />
+                    ) : (
+                      <span style={{ fontSize: 11, color: "#666" }}>QR…</span>
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+                    <p style={{
+                      margin: 0, fontSize: 13, lineHeight: "18px",
+                      fontWeight: "var(--fw-medium)", color: "var(--text-primary)",
+                    }}>
+                      Scan with your authenticator app
+                    </p>
+                    <p style={{
+                      margin: 0, fontSize: 12, lineHeight: "18px", color: "var(--text-secondary)",
+                    }}>
+                      Google Authenticator, 1Password, Authy, Bitwarden — all recognise this
+                      code. If you can't scan (e.g. desktop app), use the setup key below.
+                    </p>
+                  </div>
+                </div>
                 <SecretRow
                   label="Setup key (base32)"
                   value={payload.secret}
@@ -248,12 +317,6 @@ export default function MfaSetupPage() {
                   copied={copiedField === "uri"}
                   truncate
                 />
-                <p style={{
-                  margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: "18px",
-                }}>
-                  QR-code display ships in a follow-up. Most authenticator apps accept the setup key
-                  as a manual entry, or paste the <span className="mono">otpauth://</span> URL.
-                </p>
               </div>
             </StepCard>
 
