@@ -12,7 +12,7 @@ must build a fresh facts object from a fresh snapshot.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Optional, Protocol
 
 
 Language = Literal["en", "hi", "kn", "mr"]
@@ -77,6 +77,23 @@ class NarrationFacts:
 
 
 @dataclass(frozen=True)
+class TokenUsage:
+    """Per-call token counts extracted from the LLM response.
+
+    All fields default to None so the mock adapter (which does not
+    make an API call) can construct a ``TokenUsage()`` without lying
+    about zero-usage — NULL in the log table means "no LLM was
+    called", while 0 would mean "LLM was called and reported 0",
+    which would be a bug.
+    """
+
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    cache_read_input_tokens: Optional[int] = None
+    cache_creation_input_tokens: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class NarrationOutput:
     """The four prose blocks the template engine slots into the 2-pager.
 
@@ -90,6 +107,10 @@ class NarrationOutput:
     ``provider`` + ``model`` + ``language`` are attribution metadata
     stored alongside the narration in ``narration_run`` so a later CA
     edit can see what the machine originally said.
+
+    ``usage`` is populated by the adapter and read by the service to
+    write ``narrator_call_log``. Never surfaced to the CA — internal
+    cost meter only.
     """
 
     page1_health: str
@@ -99,6 +120,7 @@ class NarrationOutput:
     provider: str
     model: str
     language: str
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 class NarratorError(RuntimeError):

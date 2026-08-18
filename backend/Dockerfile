@@ -20,6 +20,12 @@ WORKDIR /app
 #  * fonts-noto-core + fonts-indic — Latin base + Devanagari/Kannada/Tamil
 #    for the vernacular 2-pager narration. The template falls back through
 #    DejaVu → Noto Sans → Noto Sans Devanagari/Kannada.
+#  * tesseract-ocr + tesseract-ocr-eng — OCR binary + English language pack
+#    for the P2.1 Step 3b scanned-invoice adapter. Additional language
+#    packs (hin/kan/mar/tam) can be added later behind an OCR_LANGS build
+#    arg without changing this file's shape.
+#  * poppler-utils — provides ``pdftoppm``, which pdf2image shells out to
+#    when rasterising each PDF page for tesseract.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
@@ -30,6 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         shared-mime-info \
         fonts-noto-core \
         fonts-indic \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the whole project so pip's editable install can resolve the package

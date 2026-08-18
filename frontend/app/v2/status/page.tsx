@@ -1,8 +1,21 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   BellIcon, MoonIcon, ChevronDownIcon, ArrowUpRightIcon, CheckCircleIcon,
+  AlertTriangleIcon,
 } from "@/components/v2/icons";
+import { ErrorBanner } from "@/components/v2/ui/ErrorBanner";
+import {
+  useStatusData,
+  overallState,
+  buildServices,
+  stateLabel,
+  stateColorVar,
+  formatRelativeSeconds,
+  type ServiceRow,
+  type ServiceState,
+} from "./useStatusData";
 
 /* --- inline SVGs --------------------------------------------------------- */
 
@@ -147,43 +160,80 @@ function PageHeader() {
 
 /* --- overall banner (success-tinted, all operational) ------------------- */
 
-function OverallBanner() {
+function OverallBanner({
+  state,
+  updatedAt,
+  loading,
+  onRefresh,
+}: {
+  state: ServiceState;
+  updatedAt: Date | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  const [tick, setTick] = useState(0);
+  // Re-render every 5s so "updated Xs ago" stays fresh without a full refetch.
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 5000);
+    return () => clearInterval(id);
+  }, []);
+  void tick;
+
+  const title =
+    state === "operational" ? "All systems operational"
+    : state === "degraded" ? "Some systems degraded"
+    : state === "down" ? "System unreachable"
+    : "Live status unknown";
+  const tone =
+    state === "operational" ? "var(--success)"
+    : state === "degraded" ? "var(--warning)"
+    : state === "down" ? "var(--danger)"
+    : "var(--text-muted)";
+  const bg =
+    state === "operational" ? "var(--success-soft)"
+    : state === "degraded" ? "var(--warning-soft)"
+    : state === "down" ? "var(--danger-soft)"
+    : "var(--row-hover)";
+  const Icon = state === "operational" ? CheckCircleIcon : AlertTriangleIcon;
+
   return (
     <div style={{
       minHeight: 96, padding: 24,
-      background: "var(--success-soft)",
-      border: "1px solid var(--success)",
-      borderLeft: "3px solid var(--success)",
+      background: bg,
+      border: `1px solid ${tone}`,
+      borderLeft: `3px solid ${tone}`,
       borderRadius: 12,
       boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
       display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ color: "var(--success)" }}><CheckCircleIcon size={22} /></span>
+        <span style={{ color: tone }}><Icon size={22} /></span>
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <div style={{
-            fontSize: 18, fontWeight: 600, color: "var(--success)",
-          }}>All systems operational</div>
+            fontSize: 18, fontWeight: 600, color: tone,
+          }}>{title}</div>
           <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-            Last incident: 4 Aug 2026 (9 days ago) · updated 12s ago
+            {loading ? "Checking…" : `Last checked ${formatRelativeSeconds(updatedAt)}`}
           </div>
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button style={{
+        <button type="button" onClick={onRefresh} disabled={loading} style={{
           height: 32, padding: "0 12px",
           border: "1px solid var(--border)", borderRadius: 8,
           background: "var(--surface)", color: "var(--text-secondary)",
-          fontSize: 12, fontWeight: 500, cursor: "pointer",
+          fontSize: 12, fontWeight: 500,
+          cursor: loading ? "not-allowed" : "pointer",
+          opacity: loading ? 0.6 : 1,
           display: "inline-flex", alignItems: "center", gap: 6,
         }}>
-          <RefreshSvg size={13} /> Refresh
+          <RefreshSvg size={13} /> {loading ? "Refreshing…" : "Refresh"}
         </button>
-        <button style={{
+        <button type="button" disabled title="Status subscriptions ship later" style={{
           height: 32, padding: "0 12px",
           border: "1px solid var(--border)", borderRadius: 8,
           background: "var(--surface)", color: "var(--text-primary)",
-          fontSize: 12, fontWeight: 500, cursor: "pointer",
+          fontSize: 12, fontWeight: 500, cursor: "not-allowed", opacity: 0.5,
           display: "inline-flex", alignItems: "center", gap: 6,
         }}>
           <BellIcon size={13} /> Subscribe to updates
@@ -217,7 +267,9 @@ function UptimeStrip() {
   );
 }
 
-function ServiceCard({ name, uptime }: { name: string; uptime: string }) {
+function ServiceCard({ row }: { row: ServiceRow }) {
+  const { fg, bg } = stateColorVar(row.state);
+  const showStrip = row.state === "operational";
   return (
     <div style={{
       padding: 20, background: "var(--surface)",
@@ -229,25 +281,31 @@ function ServiceCard({ name, uptime }: { name: string; uptime: string }) {
         <span style={{ color: "var(--text-secondary)" }}><MonitorSvg size={16} /></span>
         <span style={{
           flex: 1, fontSize: 15, fontWeight: 500, color: "var(--text-primary)",
-        }}>{name}</span>
+        }}>{row.name}</span>
         <span style={{
-          fontSize: 15, fontWeight: 500, color: "var(--text-primary)",
-          fontVariantNumeric: "tabular-nums",
-        }}>{uptime}</span>
+          fontSize: 12, color: "var(--text-secondary)",
+          maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>{row.detail}</span>
         <span style={{
           height: 20, padding: "0 8px",
-          background: "var(--success-soft)", color: "var(--success)",
+          background: bg, color: fg,
           borderRadius: 6,
           display: "inline-flex", alignItems: "center",
           fontSize: 11, fontWeight: 500,
-        }}>Operational</span>
+        }}>{stateLabel(row.state)}</span>
       </div>
-      <UptimeStrip />
+      {showStrip ? <UptimeStrip /> : (
+        <div style={{
+          fontSize: 11, color: "var(--text-muted)", fontStyle: "italic",
+        }}>
+          90-day uptime graph unavailable — historical uptime not persisted.
+        </div>
+      )}
     </div>
   );
 }
 
-function Components() {
+function Components({ rows }: { rows: ServiceRow[] }) {
   return (
     <div style={{ marginTop: 64 }}>
       <h2 style={{
@@ -255,13 +313,15 @@ function Components() {
         letterSpacing: "-0.01em", color: "var(--text-primary)",
       }}>Components</h2>
       <div style={{ marginTop: 8, fontSize: 13, color: "var(--text-muted)" }}>
-        Uptime for the last 90 days · updated every 60s
+        Live check via <span style={{ fontFamily: "var(--font-mono-v2)" }}>/health</span> +{" "}
+        <span style={{ fontFamily: "var(--font-mono-v2)" }}>/readyz</span> · rows without a real
+        endpoint are marked "Not monitored via API".
       </div>
       <div style={{
         marginTop: 24, display: "flex", flexDirection: "column", gap: 12,
       }}>
-        {SERVICES.map(s => (
-          <ServiceCard key={s.name} name={s.name} uptime={s.uptime} />
+        {rows.map((r) => (
+          <ServiceCard key={r.name} row={r} />
         ))}
       </div>
     </div>
@@ -535,13 +595,37 @@ function Footer() {
 /* --- page --------------------------------------------------------------- */
 
 export default function StatusPage() {
+  const { health, ready, loading, error, lastFetched, reload } = useStatusData();
+  const state = overallState(health, ready, error);
+  const services = buildServices(health, ready);
   return (
     <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
       <Header />
       <PageHeader />
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 32px 48px" }}>
-        <OverallBanner />
-        <Components />
+        <OverallBanner state={state} updatedAt={lastFetched} loading={loading} onRefresh={reload} />
+        {error && (
+          <div style={{ marginTop: 16 }}>
+            <ErrorBanner message={`Health-check probe error: ${error}`} onRetry={reload} />
+          </div>
+        )}
+        <Components rows={services} />
+        {/* Scope notice — history + metrics + subscribe are not backed by real
+         *  endpoints. Kept for design continuity; flag before shipping public. */}
+        <div style={{
+          marginTop: 32, padding: "10px 14px",
+          background: "var(--row-hover)", border: "1px solid var(--border)",
+          borderRadius: 8, fontSize: 12, color: "var(--text-secondary)",
+          display: "flex", alignItems: "flex-start", gap: 8,
+        }}>
+          <span style={{ color: "var(--text-muted)", marginTop: 1 }}><AlertTriangleIcon size={14} /></span>
+          <span>
+            The <strong>components</strong> section above is live. The <strong>incident
+            history</strong>, <strong>metrics</strong>, and <strong>subscribe channels</strong> below
+            are design placeholders — no incident log, uptime history, or subscription service is
+            wired yet.
+          </span>
+        </div>
         <IncidentHistory />
         <Metrics />
         <Subscribe />

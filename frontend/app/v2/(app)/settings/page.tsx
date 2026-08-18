@@ -1,4 +1,6 @@
-import type { CSSProperties } from "react";
+"use client";
+
+import { useState, type CSSProperties } from "react";
 import {
   AlertTriangleIcon,
   CheckCircleIcon,
@@ -7,8 +9,20 @@ import {
   PlusIcon,
   SearchIcon,
 } from "@/components/v2/icons";
+import { ErrorBanner } from "@/components/v2/ui/ErrorBanner";
+import { EmptyState } from "@/components/v2/ui/EmptyState";
+import {
+  buildMemberRows,
+  seatsSummary,
+  useInviteMutation,
+  useSettingsData,
+  type FirmSettings,
+  type MemberRow,
+} from "./useSettingsData";
 
-type RoleName = "Owner" | "Admin" | "Partner" | "Manager" | "Associate" | "External";
+// Role palette + demo shape. Backend distinguishes only admin/staff;
+// UI-only labels ("Owner", "Invited") are derived in useSettingsData.
+type RoleName = "Owner" | "Admin" | "Staff" | "Invited" | "Partner" | "Manager" | "Associate" | "External";
 type MfaKind = "Yubikey" | "TOTP" | "Not set" | "—";
 type StatusKind = "active" | "pending" | "inactive" | "invited";
 
@@ -26,6 +40,8 @@ type Member = {
   isOwner?: boolean;
 };
 
+// Fallback demo data — only rendered if backend fetch failed and we
+// have nothing to show. Real data comes from useSettingsData.
 const MEMBERS: Member[] = [
   { name: "Arjun Desai", initials: "AD", email: "arjun@acmeca.in", role: "Owner",
     scopeMain: "142 clients", scopeMeta: "all clients", lastActive: "2 min ago",
@@ -119,14 +135,39 @@ const LABEL: CSSProperties = {
 };
 
 export default function SettingsPage() {
+  const { users, invites, firm, loading, error, reload } = useSettingsData();
+  const invite = useInviteMutation(reload);
+  const memberRows = buildMemberRows(users, invites);
+  const seats = seatsSummary(users, invites);
+
   return (
     <div style={{ display: "flex", flex: 1, minWidth: 0, minHeight: 0, background: "var(--bg)" }}>
       <SettingsNav />
       <main style={{ flex: 1, minWidth: 0, overflow: "auto", padding: 32 }}>
         <div style={{ maxWidth: 960, display: "flex", flexDirection: "column", gap: 24 }}>
-          <SectionHeader />
-          <InviteBar />
-          <TeamTable />
+          <SectionHeader firm={firm} />
+          {error && <ErrorBanner message={`Could not load settings: ${error}`} onRetry={reload} />}
+          {invite.error && <ErrorBanner message={`Invite failed: ${invite.error}`} onRetry={invite.clear} retryLabel="Dismiss" />}
+          {invite.success && (
+            <div role="status" style={{
+              padding: "12px 16px",
+              border: "1px solid var(--success)",
+              borderRadius: "var(--radius-input)",
+              background: "var(--success-soft)",
+              color: "var(--success)",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              gap: 12, fontSize: 13,
+            }}>
+              <span>{invite.success}</span>
+              <button type="button" onClick={invite.clear} style={{
+                border: "1px solid var(--success)", background: "transparent",
+                color: "var(--success)", borderRadius: "var(--radius-chip)",
+                padding: "4px 10px", fontSize: 12, fontWeight: 500, cursor: "pointer",
+              }}>Dismiss</button>
+            </div>
+          )}
+          <InviteBar seats={seats} onSend={invite.send} running={invite.running} />
+          <TeamTable rows={memberRows} loading={loading && memberRows.length === 0} />
           <RolesMatrix />
           <SessionPolicy />
           <DangerZone />
@@ -227,11 +268,13 @@ function SettingsNav() {
 
 /* --------------------------------- Section header --------------------------------- */
 
-function SectionHeader() {
+function SectionHeader({ firm }: { firm: FirmSettings | null }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 24 }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 620 }}>
-        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Settings · Workspace</span>
+        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          Settings · Workspace{firm ? ` · ${firm.name}` : ""}
+        </span>
         <h1
           style={{
             margin: 0,
@@ -245,7 +288,8 @@ function SectionHeader() {
           Team &amp; permissions
         </h1>
         <p style={{ margin: 0, fontSize: 14, lineHeight: "20px", color: "var(--text-secondary)" }}>
-          Invite teammates, manage roles, and control what each person can see or do across your 142 clients.
+          Invite teammates, manage roles, and control what each person can see or do.
+          {firm && <> Plan: <strong style={{ fontWeight: 500, textTransform: "capitalize" }}>{firm.plan}</strong>.</>}
         </p>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "none" }}>
@@ -260,7 +304,22 @@ function SectionHeader() {
 
 /* --------------------------------- Invite bar --------------------------------- */
 
-function InviteBar() {
+function InviteBar({
+  seats, onSend, running,
+}: {
+  seats: { used: number; pending: number; label: string };
+  onSend: (email: string, role: "admin" | "staff") => Promise<void>;
+  running: boolean;
+}) {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"admin" | "staff">("staff");
+  const disabled = running || email.trim().length === 0 || !email.includes("@");
+
+  const submit = () => {
+    if (disabled) return;
+    onSend(email.trim(), role).then(() => setEmail(""));
+  };
+
   return (
     <section
       style={{
@@ -278,12 +337,18 @@ function InviteBar() {
         <h3 style={{ margin: 0, fontSize: "var(--fs-h2)", lineHeight: "var(--lh-h2)", fontWeight: "var(--fw-semi)", color: "var(--text-primary)" }}>
           Invite teammates
         </h3>
-        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>5 of 8 seats used · 3 available</span>
+        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{seats.label}</span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <form
+        style={{ display: "flex", alignItems: "center", gap: 8 }}
+        onSubmit={(e) => { e.preventDefault(); submit(); }}
+      >
         <input
           type="email"
           placeholder="colleague@acmeca.in"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={running}
           style={{
             flex: 1,
             height: 36,
@@ -296,10 +361,23 @@ function InviteBar() {
             color: "var(--text-primary)",
           }}
         />
-        <SelectField width={140}>Associate</SelectField>
-        <SelectField width={160}>All clients</SelectField>
+        <select
+          value={role}
+          onChange={(e) => setRole(e.target.value as "admin" | "staff")}
+          disabled={running}
+          style={{
+            width: 140, height: 36, padding: "0 12px",
+            border: "1px solid var(--border-strong)", borderRadius: "var(--radius-input)",
+            background: "var(--surface)", color: "var(--text-primary)",
+            font: `500 13px/20px var(--font-sans-v2)`, cursor: "pointer",
+          }}
+        >
+          <option value="staff">Staff</option>
+          <option value="admin">Admin</option>
+        </select>
         <button
-          type="button"
+          type="submit"
+          disabled={disabled}
           className="v2-btn-primary v2-focus"
           style={{
             height: 36,
@@ -309,14 +387,15 @@ function InviteBar() {
             background: "var(--accent)",
             color: "var(--on-accent)",
             font: `500 13px/20px var(--font-sans-v2)`,
-            cursor: "pointer",
+            cursor: disabled ? "not-allowed" : "pointer",
+            opacity: disabled ? 0.6 : 1,
           }}
         >
-          Send invite
+          {running ? "Sending…" : "Send invite"}
         </button>
-      </div>
+      </form>
       <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-        Invited users get an email + WhatsApp OTP · MFA is mandatory · Expires in 72h
+        Invited users get an email · MFA is mandatory · Expires in 72h
       </span>
     </section>
   );
@@ -350,7 +429,7 @@ function SelectField({ children, width }: { children: React.ReactNode; width: nu
 
 /* --------------------------------- Team table --------------------------------- */
 
-function TeamTable() {
+function TeamTable({ rows, loading }: { rows: MemberRow[]; loading: boolean }) {
   return (
     <section
       style={{
@@ -387,11 +466,31 @@ function TeamTable() {
           </tr>
         </thead>
         <tbody>
-          {MEMBERS.map((m, i) => <MemberRow key={m.email} m={m} last={i === MEMBERS.length - 1} />)}
+          {loading && rows.length === 0 ? (
+            <tr><td colSpan={8} style={{ padding: 48, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>Loading members…</td></tr>
+          ) : rows.length === 0 ? (
+            <tr><td colSpan={8} style={{ padding: 0 }}><EmptyState message="No members yet." hint="Send an invite to get started." /></td></tr>
+          ) : (
+            rows.map((m, i) => (
+              <MemberRow
+                key={m.key}
+                m={{
+                  name: m.name, initials: m.initials, email: m.email,
+                  subtitle: m.subtitle ?? undefined,
+                  role: m.role, scopeMain: m.scopeMain, scopeMeta: m.scopeMeta,
+                  lastActive: m.lastActive, mfa: m.mfa, status: m.status,
+                  isOwner: m.isOwner,
+                }}
+                last={i === rows.length - 1}
+              />
+            ))
+          )}
         </tbody>
       </table>
       <div style={{ height: 44, padding: "0 16px", borderTop: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Showing 8 of 8</span>
+        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+          {loading && rows.length === 0 ? "Loading…" : `Showing ${rows.length} of ${rows.length}`}
+        </span>
         <button
           type="button"
           className="v2-hover-tint v2-focus"
@@ -525,6 +624,8 @@ function RoleChip({ role }: { role: RoleName }) {
   if (role === "Partner") return <span style={{ ...base, background: "var(--success-soft)", color: "var(--success)" }}>Partner</span>;
   if (role === "Manager") return <span style={{ ...base, background: "var(--warning-soft)", color: "var(--warning)" }}>Manager</span>;
   if (role === "External") return <span style={{ ...base, background: "transparent", color: "var(--text-secondary)", border: "1px dashed var(--border-strong)" }}>External</span>;
+  if (role === "Invited") return <span style={{ ...base, background: "transparent", color: "var(--text-secondary)", border: "1px dashed var(--border-strong)" }}>Invited</span>;
+  if (role === "Staff") return <span style={{ ...base, background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>Staff</span>;
   return <span style={{ ...base, background: "transparent", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>Associate</span>;
 }
 

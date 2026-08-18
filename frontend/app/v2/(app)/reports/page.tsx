@@ -11,41 +11,19 @@ import {
   ArrowUpIcon,
   PlusIcon,
 } from "@/components/v2/icons";
-
-/* --- demo data ------------------------------------------------------------ */
-
-const MONTHS = [
-  "Sep", "Oct", "Nov", "Dec", "Jan", "Feb",
-  "Mar", "Apr", "May", "Jun", "Jul", "Aug",
-];
-
-// filings-by-month, 5 stacks per month
-type Stack = { gst1: number; gst3b: number; tds: number; roc: number; other: number };
-const STACKS: Stack[] = [
-  { gst1: 53, gst3b: 42, tds: 16, roc: 13, other: 8 },
-  { gst1: 55, gst3b: 44, tds: 17, roc: 14, other: 9 },
-  { gst1: 58, gst3b: 45, tds: 18, roc: 12, other: 8 },
-  { gst1: 61, gst3b: 47, tds: 19, roc: 15, other: 10 },
-  { gst1: 64, gst3b: 49, tds: 21, roc: 14, other: 9 },
-  { gst1: 63, gst3b: 48, tds: 22, roc: 16, other: 11 },
-  { gst1: 66, gst3b: 51, tds: 23, roc: 15, other: 10 },
-  { gst1: 70, gst3b: 54, tds: 24, roc: 17, other: 12 },
-  { gst1: 72, gst3b: 55, tds: 25, roc: 16, other: 11 },
-  { gst1: 75, gst3b: 57, tds: 26, roc: 18, other: 13 },
-  { gst1: 74, gst3b: 55, tds: 25, roc: 17, other: 11 },
-  { gst1: 78, gst3b: 58, tds: 27, roc: 18, other: 12 },
-];
-
-// prev-period overlay totals
-const PREV_TOTALS = [118, 124, 128, 138, 145, 149, 155, 168, 172, 179, 174, 185];
-
-// filing timeliness (area chart) — 4 series, values are % on-time
-const TIMELINESS = {
-  gst1:  [96.8, 96.9, 96.6, 97.2, 96.8, 96.4, 97.1, 96.6, 96.4, 96.2, 95.9, 96.2],
-  gst3b: [97.4, 97.1, 97.2, 96.9, 96.8, 96.6, 96.4, 96.2, 95.9, 95.7, 95.5, 95.4],
-  tds:   [95.1, 95.4, 95.6, 95.2, 94.9, 94.7, 95.0, 94.6, 94.3, 94.1, 93.9, 94.0],
-  roc:   [92.4, 92.6, 92.8, 93.1, 93.0, 92.7, 92.9, 92.5, 92.2, 91.9, 91.7, 91.8],
-};
+import { ErrorBanner } from "@/components/v2/ui/ErrorBanner";
+import { EmptyState } from "@/components/v2/ui/EmptyState";
+import {
+  buildMonthlyStacks,
+  buildPrevTotals,
+  computeKpis,
+  monthsWindowLabel,
+  useReportsData,
+  type MonthlyStack,
+  type MonthlyTimeliness,
+  type ReportsKpi,
+  type TimelinessResponse,
+} from "./useReportsData";
 
 // team performance rows
 type Row = {
@@ -159,10 +137,15 @@ function Sparkline({
 
 /* --- stacked bar chart ---------------------------------------------------- */
 
-function StackedBars() {
-  const barMax = 200;
-  const barH = 208; // px content area
-  const stacks = STACKS;
+function StackedBars({ stacks, prevTotals }: { stacks: MonthlyStack[]; prevTotals: number[] }) {
+  const allTotals = [...stacks.map((s) => s.total), ...prevTotals];
+  const rawMax = Math.max(...allTotals, 10);
+  // Round up to a friendly axis max.
+  const step = rawMax <= 50 ? 10 : rawMax <= 200 ? 50 : 100;
+  const barMax = Math.ceil(rawMax / step) * step || step;
+  const barH = 208;
+  const gridSteps = 4;
+  const axisTicks = Array.from({ length: gridSteps + 1 }, (_, i) => Math.round(barMax - (i * barMax) / gridSteps));
   return (
     <div style={{ display: "flex", gap: 24, alignItems: "stretch" }}>
       {/* y-axis */}
@@ -171,7 +154,7 @@ function StackedBars() {
         paddingTop: 4, paddingBottom: 24, width: 32,
         fontSize: 11, color: "var(--text-muted)", textAlign: "right",
       }}>
-        {[200, 150, 100, 50, 0].map(v => <div key={v}>{v}</div>)}
+        {axisTicks.map((v, i) => <div key={i}>{v}</div>)}
       </div>
       {/* bars */}
       <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
@@ -192,8 +175,8 @@ function StackedBars() {
           alignItems: "flex-end", gap: 8, padding: "4px 0 0 0",
         }}>
           {stacks.map((s, i) => {
-            const total = s.gst1 + s.gst3b + s.tds + s.roc + s.other;
-            const prev = PREV_TOTALS[i];
+            const total = s.total;
+            const prev = prevTotals[i] ?? 0;
             const segH = (v: number) => (v / barMax) * barH;
             return (
               <div key={i} style={{
@@ -201,31 +184,33 @@ function StackedBars() {
                 justifyContent: "center", position: "relative", height: barH,
               }}>
                 {/* previous period outline */}
-                <div style={{
-                  position: "absolute", left: "50%", transform: "translateX(-50%)",
-                  bottom: 0, width: 28, height: (prev / barMax) * barH,
-                  border: "1px dashed var(--border-strong)",
-                  borderRadius: "6px 6px 0 0",
-                  pointerEvents: "none",
-                }} />
+                {prev > 0 && (
+                  <div style={{
+                    position: "absolute", left: "50%", transform: "translateX(-50%)",
+                    bottom: 0, width: 28, height: (prev / barMax) * barH,
+                    border: "1px dashed var(--border-strong)",
+                    borderRadius: "6px 6px 0 0",
+                    pointerEvents: "none",
+                  }} />
+                )}
                 {/* current stack */}
                 <div style={{
                   width: 20, display: "flex", flexDirection: "column-reverse",
                   borderRadius: "6px 6px 0 0", overflow: "hidden",
+                  minHeight: total > 0 ? 2 : 0,
                 }}>
-                  <div style={{ height: segH(s.gst1), background: "var(--accent)" }} title={`GST-1 ${s.gst1}`} />
-                  <div style={{ height: segH(s.gst3b), background: "var(--success)" }} title={`GST-3B ${s.gst3b}`} />
-                  <div style={{ height: segH(s.tds), background: "var(--warning)" }} title={`TDS 24Q ${s.tds}`} />
-                  <div style={{ height: segH(s.roc), background: "var(--text-secondary)" }} title={`ROC ${s.roc}`} />
-                  <div style={{ height: segH(s.other), background: "var(--danger)" }} title={`Others ${s.other}`} />
+                  <div style={{ height: segH(s.gstr1), background: "var(--accent)" }} title={`GSTR-1 ${s.gstr1}`} />
+                  <div style={{ height: segH(s.gstr3b), background: "var(--success)" }} title={`GSTR-3B ${s.gstr3b}`} />
+                  <div style={{ height: segH(s.other), background: "var(--text-secondary)" }} title={`Other ${s.other}`} />
                 </div>
-                {/* total label on hover — always visible for now */}
-                <div style={{
-                  position: "absolute", bottom: "100%", left: "50%",
-                  transform: "translateX(-50%)", marginBottom: 2,
-                  fontSize: 10, color: "var(--text-muted)", fontWeight: 500,
-                  whiteSpace: "nowrap",
-                }}>{total}</div>
+                {total > 0 && (
+                  <div style={{
+                    position: "absolute", bottom: "100%", left: "50%",
+                    transform: "translateX(-50%)", marginBottom: 2,
+                    fontSize: 10, color: "var(--text-muted)", fontWeight: 500,
+                    whiteSpace: "nowrap",
+                  }}>{total}</div>
+                )}
               </div>
             );
           })}
@@ -235,8 +220,8 @@ function StackedBars() {
           display: "flex", gap: 8, marginTop: 8, height: 16,
           fontSize: 11, color: "var(--text-muted)",
         }}>
-          {MONTHS.map(m => (
-            <div key={m} style={{ flex: 1, textAlign: "center" }}>{m}</div>
+          {stacks.map((s) => (
+            <div key={s.period} style={{ flex: 1, textAlign: "center" }}>{s.label}</div>
           ))}
         </div>
       </div>
@@ -246,76 +231,132 @@ function StackedBars() {
 
 /* --- multi-line area chart (filing timeliness) ---------------------------- */
 
-function TimelinessChart() {
+/** On-time percentage per month per return type.
+ *  Months with zero filings render as gaps (broken polyline) — better than
+ *  charting 0% and pretending the firm was 100% late. */
+function TimelinessChart({ data, loading }: { data: TimelinessResponse | null; loading: boolean }) {
+  if (loading && data === null) {
+    return <div style={{ height: 228, display: "grid", placeItems: "center", color: "var(--text-muted)", fontSize: 13 }}>Loading timeliness…</div>;
+  }
+  if (!data || data.months.length === 0) {
+    return <EmptyState message="No timeliness data yet." hint="Once filings are marked filed the chart will populate." />;
+  }
+  const anyFiled = data.total_filed > 0;
+  if (!anyFiled) {
+    return <EmptyState message="No filings marked filed in the last 12 months." hint="On-time % becomes available after the first mark-filed action." />;
+  }
+
   const w = 900, h = 220;
-  const yMin = 90, yMax = 100;
-  const stepX = w / (12 - 1);
-  const toPoints = (arr: number[]) =>
-    arr.map((v, i) => {
+  const months = data.months;
+  const yMin = 0, yMax = 100;
+  const stepX = months.length > 1 ? w / (months.length - 1) : 0;
+
+  type PointList = Array<{ x: number; y: number } | null>;
+  const buildPoints = (pick: (m: MonthlyTimeliness) => number | null): PointList =>
+    months.map((m, i) => {
+      const v = pick(m);
+      if (v === null) return null;
       const x = i * stepX;
       const y = h - ((v - yMin) / (yMax - yMin)) * (h - 24) - 8;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(" ");
+      return { x, y };
+    });
 
-  const series: { key: keyof typeof TIMELINESS; label: string; color: string }[] = [
-    { key: "gst1", label: "GST-1", color: "var(--accent)" },
-    { key: "gst3b", label: "GST-3B", color: "var(--success)" },
-    { key: "tds", label: "TDS 24Q", color: "var(--warning)" },
-    { key: "roc", label: "ROC AOC", color: "var(--text-secondary)" },
+  const pctOrNull = (on: number, total: number) => (total === 0 ? null : (on / total) * 100);
+
+  const series: { key: string; label: string; color: string; points: PointList }[] = [
+    {
+      key: "gstr1",
+      label: "GSTR-1",
+      color: "var(--accent)",
+      points: buildPoints((m) => pctOrNull(m.gstr1_on_time, m.gstr1_filed)),
+    },
+    {
+      key: "gstr3b",
+      label: "GSTR-3B",
+      color: "var(--success)",
+      points: buildPoints((m) => pctOrNull(m.gstr3b_on_time, m.gstr3b_filed)),
+    },
   ];
 
+  // Break the polyline at NULLs so months with no data don't get bridged.
+  const pointsToSegments = (pts: PointList): string[] => {
+    const segs: string[] = [];
+    let cur: string[] = [];
+    for (const p of pts) {
+      if (p === null) {
+        if (cur.length > 1) segs.push(cur.join(" "));
+        cur = [];
+      } else {
+        cur.push(`${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+      }
+    }
+    if (cur.length > 1) segs.push(cur.join(" "));
+    return segs;
+  };
+
   return (
-    <div style={{ display: "flex", gap: 16 }}>
-      {/* y-axis */}
-      <div style={{
-        display: "flex", flexDirection: "column", justifyContent: "space-between",
-        paddingBottom: 24, width: 36, fontSize: 11, color: "var(--text-muted)",
-        textAlign: "right",
-      }}>
-        <div>100%</div>
-        <div>97.5%</div>
-        <div>95%</div>
-        <div>92.5%</div>
-        <div>90%</div>
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <svg viewBox={`0 0 ${w} ${h + 8}`} width="100%" height={h + 8}
-             preserveAspectRatio="none" style={{ display: "block" }}>
-          {/* gridlines */}
-          {[0, 1, 2, 3, 4].map(i => (
-            <line key={i}
-              x1={0} x2={w}
-              y1={(i * (h - 8)) / 4 + 4}
-              y2={(i * (h - 8)) / 4 + 4}
-              stroke="var(--border)"
-              strokeWidth={1}
-              vectorEffect="non-scaling-stroke"
-              opacity={i === 4 ? 1 : 0.5}
-            />
-          ))}
-          {series.map(s => (
-            <g key={s.key}>
-              <polyline
-                points={toPoints(TIMELINESS[s.key])}
-                fill="none"
-                stroke={s.color}
-                strokeWidth={2}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                vectorEffect="non-scaling-stroke"
-              />
-            </g>
-          ))}
-        </svg>
-        {/* x-axis labels */}
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", gap: 16 }}>
         <div style={{
-          display: "flex", marginTop: 8, height: 16,
-          fontSize: 11, color: "var(--text-muted)",
+          display: "flex", flexDirection: "column", justifyContent: "space-between",
+          paddingBottom: 24, width: 36, fontSize: 11, color: "var(--text-muted)",
+          textAlign: "right",
         }}>
-          {MONTHS.map(m => (
-            <div key={m} style={{ flex: 1, textAlign: "center" }}>{m}</div>
-          ))}
+          <div>100%</div>
+          <div>75%</div>
+          <div>50%</div>
+          <div>25%</div>
+          <div>0%</div>
         </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <svg viewBox={`0 0 ${w} ${h + 8}`} width="100%" height={h + 8}
+               preserveAspectRatio="none" style={{ display: "block" }}>
+            {[0, 1, 2, 3, 4].map(i => (
+              <line key={i}
+                x1={0} x2={w}
+                y1={(i * (h - 8)) / 4 + 4}
+                y2={(i * (h - 8)) / 4 + 4}
+                stroke="var(--border)"
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+                opacity={i === 4 ? 1 : 0.5}
+              />
+            ))}
+            {series.map(s => (
+              <g key={s.key}>
+                {pointsToSegments(s.points).map((seg, i) => (
+                  <polyline
+                    key={i}
+                    points={seg}
+                    fill="none"
+                    stroke={s.color}
+                    strokeWidth={2}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                ))}
+                {s.points.map((p, i) =>
+                  p === null ? null : (
+                    <circle key={`d-${s.key}-${i}`} cx={p.x} cy={p.y} r={2.5} fill={s.color} vectorEffect="non-scaling-stroke" />
+                  )
+                )}
+              </g>
+            ))}
+          </svg>
+          <div style={{
+            display: "flex", marginTop: 8, height: 16,
+            fontSize: 11, color: "var(--text-muted)",
+          }}>
+            {months.map((m) => (
+              <div key={m.period} style={{ flex: 1, textAlign: "center" }}>{m.label.slice(0, 3)}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "right" }}>
+        {data.total_filed} filing{data.total_filed === 1 ? "" : "s"} in window · {data.total_on_time} on-time (
+        {data.total_filed > 0 ? `${((data.total_on_time / data.total_filed) * 100).toFixed(1)}%` : "—"})
       </div>
     </div>
   );
@@ -640,17 +681,20 @@ function AiInsights() {
 
 export default function ReportsPage() {
   const [seg, setSeg] = useState<"type" | "status" | "owner">("type");
+  const { cc, health, filings, timeliness, loading, error, reload } = useReportsData();
+  const stacks = buildMonthlyStacks(filings, 12);
+  const prevTotals = buildPrevTotals(filings, 12);
+  const kpis = computeKpis(cc, health, stacks);
+  const windowLabel = monthsWindowLabel();
   const segments: { key: typeof seg; label: string }[] = [
     { key: "type",   label: "By return type" },
     { key: "status", label: "By status" },
     { key: "owner",  label: "By owner" },
   ];
   const legend = [
-    { label: "GST-1", color: "var(--accent)" },
-    { label: "GST-3B", color: "var(--success)" },
-    { label: "TDS 24Q", color: "var(--warning)" },
-    { label: "ROC AOC", color: "var(--text-secondary)" },
-    { label: "Others", color: "var(--danger)" },
+    { label: "GSTR-1", color: "var(--accent)" },
+    { label: "GSTR-3B", color: "var(--success)" },
+    { label: "Other", color: "var(--text-secondary)" },
   ];
   return (
     <div style={{
@@ -658,6 +702,7 @@ export default function ReportsPage() {
       display: "flex", gap: 16, alignItems: "flex-start",
     }}>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 16 }}>
+        {error && <ErrorBanner message={`Could not load reports: ${error}`} onRetry={reload} />}
         {/* header card */}
         <div style={{
           background: "var(--surface)", border: "1px solid var(--border)",
@@ -682,7 +727,7 @@ export default function ReportsPage() {
                   border: "1px solid var(--border)",
                   fontSize: 12, color: "var(--text-secondary)", fontWeight: 500,
                 }}>
-                  <CalendarIcon size={12} /> Sep 2025 – Aug 2026
+                  <CalendarIcon size={12} /> {windowLabel}
                 </div>
               </div>
             </div>
@@ -740,14 +785,17 @@ export default function ReportsPage() {
 
         {/* KPI strip */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-          <KpiCell label="Total filings" value="1,847" delta="+11.4% vs prev" deltaTone="success"
-                   spark={[128, 141, 136, 152, 149, 161, 158, 173]} sparkTone="success" />
-          <KpiCell label="On-time rate" value="96.2%" delta="−0.6 pp vs 96.8%" deltaTone="danger"
-                   spark={[97.4, 97.1, 97.2, 96.9, 96.8, 96.6, 96.4, 96.2]} sparkTone="danger" />
-          <KpiCell label="Avg turnaround (days)" value="3.4d" delta="−0.8d vs 4.2d" deltaTone="success"
-                   spark={[4.6, 4.4, 4.3, 4.0, 3.9, 3.7, 3.5, 3.4]} sparkTone="success" />
-          <KpiCell label="Billable hrs saved (est.)" value="412" delta="+62 vs 350" deltaTone="accent"
-                   spark={[318, 330, 342, 356, 371, 388, 401, 412]} sparkTone="accent" />
+          {kpis.map((k, i) => (
+            <KpiCell
+              key={i}
+              label={k.label}
+              value={loading && k.value === "—" ? "…" : k.value}
+              delta={k.delta}
+              deltaTone={k.deltaTone === "neutral" ? "accent" : k.deltaTone}
+              spark={k.spark}
+              sparkTone={k.sparkTone}
+            />
+          ))}
         </div>
 
         {/* filings by month */}
@@ -773,7 +821,7 @@ export default function ReportsPage() {
               <ArrowUpIcon size={12} /> +11.4% YoY
             </div>
           </div>
-          <StackedBars />
+          <StackedBars stacks={stacks} prevTotals={prevTotals} />
         </div>
 
         {/* filing timeliness */}
@@ -791,7 +839,10 @@ export default function ReportsPage() {
               </div>
             </div>
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              {legend.slice(0, 4).map(l => (
+              {[
+                { label: "GSTR-1", color: "var(--accent)" },
+                { label: "GSTR-3B", color: "var(--success)" },
+              ].map(l => (
                 <div key={l.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <div style={{ width: 10, height: 2, background: l.color, borderRadius: 2 }} />
                   <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{l.label}</div>
@@ -799,7 +850,7 @@ export default function ReportsPage() {
               ))}
             </div>
           </div>
-          <TimelinessChart />
+          <TimelinessChart data={timeliness} loading={loading} />
         </div>
 
         <TeamTable />

@@ -62,11 +62,58 @@ def test_patch_toggles_reminders_and_audits(test_client, bootstrap_firm) -> None
         rows = conn.execute(
             text(
                 "SELECT diff FROM audit_log "
-                "WHERE firm_id = :fid AND action = 'firm.reminders_toggled'"
+                "WHERE firm_id = :fid AND action = 'firm.settings_updated'"
             ),
             {"fid": str(admin["firm_id"])},
         ).fetchall()
     assert rows, "expected an audit row for the toggle"
+
+
+def test_get_settings_default_narrator_off(test_client, bootstrap_firm) -> None:
+    """Per-firm narrator flag defaults to FALSE (opt-in) — mirrors the
+    P2.4 Step 2 migration."""
+    admin = bootstrap_firm(admin_email=f"gn-{uuid.uuid4().hex[:6]}@example.com")
+    tok = _bearer(test_client, admin)
+    r = test_client.get(
+        "/firm/settings", headers={"Authorization": f"Bearer {tok}"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["narrator_enabled"] is False
+
+
+def test_patch_toggles_narrator_and_audits(test_client, bootstrap_firm) -> None:
+    admin = bootstrap_firm(admin_email=f"pn-{uuid.uuid4().hex[:6]}@example.com")
+    tok = _bearer(test_client, admin)
+
+    r = test_client.patch(
+        "/firm/settings",
+        json={"narrator_enabled": True},
+        headers={"Authorization": f"Bearer {tok}"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["narrator_enabled"] is True
+
+    # Re-read confirms persistence.
+    r = test_client.get(
+        "/firm/settings", headers={"Authorization": f"Bearer {tok}"}
+    )
+    assert r.json()["narrator_enabled"] is True
+
+    # Audit row exists and includes narrator_enabled in its metadata.
+    with owner_engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT diff FROM audit_log "
+                "WHERE firm_id = :fid AND action = 'firm.settings_updated'"
+            ),
+            {"fid": str(admin["firm_id"])},
+        ).fetchall()
+    assert rows, "expected an audit row for the narrator toggle"
+    # diff is JSONB — check any row carries narrator_enabled.
+    assert any(
+        r[0] is not None and r[0].get("narrator_enabled") is True for r in rows
+    )
 
 
 def test_patch_requires_admin(test_client, bootstrap_firm) -> None:

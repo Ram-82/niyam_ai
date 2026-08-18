@@ -16,6 +16,29 @@ import os
 import uuid
 from typing import Iterator
 
+# ---------------------------------------------------------------------------
+# Env guards — must run BEFORE any `from app.config import settings` (or
+# `import app.gsp.crypto`) is triggered by test collection.
+#
+# Rationale:
+#   1. The developer's ``.env`` may set ``GSP_MODE=whitebooks`` (or another
+#      live-mode value) for staging probes. Tests should NEVER call a
+#      real vendor — force ``GSP_MODE=mock`` so
+#      (a) sandbox_mode flags read True as the suite expects, and
+#      (b) ``app.gsp.crypto`` uses the dev default key path.
+#   2. The dev default key path only kicks in when ``GSP_ENCRYPTION_KEYS``
+#      is empty; if the developer set it in ``.env`` (harmless in prod,
+#      contradictory in tests) inject the deterministic dev key so
+#      encryption is reproducible in the test session.
+#
+# pydantic-settings priority order is: init args > env vars > .env file >
+# defaults. So ``os.environ`` writes here override anything the developer
+# put in ``.env``.
+os.environ["GSP_MODE"] = "mock"
+os.environ["GSP_ENCRYPTION_KEYS"] = (
+    "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+)
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -34,8 +57,10 @@ TRUNCATE_ORDER = (
     "b2b_entry",
     "gstn_pull",
     "validation_flag",
+    "ocr_extraction",
     "invoice",
     "narration_run",
+    "narrator_call_log",
     "readiness_snapshot",
     "consent_log",
     "audit_log",
@@ -119,13 +144,31 @@ def _ensure_rule_pack_seed(_ensure_schema_at_head) -> None:
 
 @pytest.fixture(autouse=True)
 def clean_db() -> Iterator[None]:
-    """Truncate all tenant tables between tests, as the owner (bypasses RLS)."""
-    # Truncate as owner. rule_pack is included because some engine tests
-    # write rule packs; RLS tests do not depend on it.
+    """Truncate all tenant tables between tests, as the owner (bypasses RLS).
+
+    Re-seeds ``rule_pack`` after every truncate. ``ca_firm`` is truncated
+    CASCADE, and migration 0016 added ``rule_pack.firm_id → ca_firm``, so
+    the cascade wipes rule_pack even though it is not in TRUNCATE_ORDER.
+    Without the re-seed, every test after the first would fail with
+    ``NoActiveRulePackError`` (the session-scoped ``_ensure_rule_pack_seed``
+    only runs once at session start).
+    """
+    import json
+    from app.rules.default_pack import PAYLOAD, VERSION
+
     with owner_engine.begin() as conn:
         for t in TRUNCATE_ORDER:
             # Owner has SUPERUSER: can TRUNCATE even append-only tables.
             conn.execute(text(f"TRUNCATE TABLE {t} RESTART IDENTITY CASCADE"))
+        conn.execute(
+            text(
+                "INSERT INTO rule_pack (version, payload, active, notes) "
+                "VALUES (:v, CAST(:p AS JSONB), TRUE, 'ensured by conftest') "
+                "ON CONFLICT (version) DO UPDATE "
+                "SET payload = EXCLUDED.payload, active = TRUE"
+            ),
+            {"v": VERSION, "p": json.dumps(PAYLOAD)},
+        )
     yield
 
 

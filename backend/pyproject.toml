@@ -29,6 +29,14 @@ dependencies = [
     "jinja2>=3.1",
     "weasyprint>=62.0",
     "gunicorn>=22.0",
+    # OCR (P2.1 Step 3a + 3b). pdfminer.six for text-native PDFs;
+    # pytesseract + pdf2image + Pillow for scanned PDFs / photos.
+    # pdf2image shells out to poppler-utils and pytesseract shells out
+    # to the tesseract-ocr binary — see Dockerfile for the apt install.
+    "pdfminer.six>=20240706",
+    "pytesseract>=0.3.10",
+    "pdf2image>=1.17",
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +48,6 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "types-python-dateutil",
-    "pdfminer.six>=20240706",
     "pytest-timeout>=2.3",
 ]
 

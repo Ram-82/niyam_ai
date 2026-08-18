@@ -1,7 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { SunIcon, MoonIcon, ChevronDownIcon, ArrowUpRightIcon } from "@/components/v2/icons";
+import { api, ApiError } from "@/lib/api";
+import { setAccessToken } from "@/lib/auth";
+import type { LoginResponse } from "@/lib/types";
+import { RATE_LIMIT_COPY } from "@/lib/constants";
+import { formatRetryAt } from "@/lib/format-retry-after";
+import { ErrorBanner } from "@/components/v2/ui/ErrorBanner";
 
 /* --- inline SVGs specific to this page ------------------------------------ */
 
@@ -322,11 +329,18 @@ function Nav({ theme, onToggleTheme }: { theme: "light" | "dark"; onToggleTheme:
 
 /* --- page ---------------------------------------------------------------- */
 
+type Step = "creds" | "totp" | "setup_required";
+
 export default function SignInPage() {
-  const [email, setEmail] = useState("priya@acmeca.in");
-  const [password, setPassword] = useState("Kx7mQ2wLp9");
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [totp, setTotp] = useState("");
   const [show, setShow] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [step, setStep] = useState<Step>("creds");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const toggleTheme = () => {
     const next = theme === "light" ? "dark" : "light";
@@ -339,6 +353,66 @@ export default function SignInPage() {
       }
     }
   };
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const body: Record<string, string> = { email, password };
+      if (totp) body.totp_code = totp;
+      const res = await api<LoginResponse>("/auth/login", {
+        method: "POST",
+        body,
+        authenticated: false,
+      });
+      if ("access_token" in res) {
+        setAccessToken(res.access_token);
+        router.push("/v2/dashboard");
+        return;
+      }
+      // First-time login: backend returned a totp_setup_token. Stash it so
+      // the enrolment page can pick it up, then navigate. sessionStorage
+      // clears on tab close — the token has a short TTL anyway.
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem("niyam.totp_setup_token", res.totp_setup_token);
+      }
+      router.push("/v2/mfa-setup");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 400) {
+        const detail =
+          typeof err.body === "object" && err.body !== null && "detail" in err.body
+            ? String((err.body as { detail: unknown }).detail)
+            : err.message;
+        if (detail === "totp_required") {
+          setStep("totp");
+          setError(null);
+          return;
+        }
+        setError(detail || "Sign-in failed.");
+      } else if (err instanceof ApiError && err.status === 401) {
+        setError("Wrong email or password.");
+      } else if (err instanceof ApiError && err.status === 429) {
+        const at =
+          err.retryAfterSeconds != null
+            ? formatRetryAt(err.retryAfterSeconds)
+            : "a later time";
+        setError(RATE_LIMIT_COPY.login_lockout(at));
+      } else if (err instanceof ApiError) {
+        setError(err.message || `Sign-in failed (${err.status}).`);
+      } else {
+        setError(String(err));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function resetToCreds() {
+    setStep("creds");
+    setTotp("");
+    setError(null);
+  }
 
   return (
     <div style={{
@@ -354,7 +428,7 @@ export default function SignInPage() {
       }}>
         <div style={{ width: 440, display: "flex", flexDirection: "column", gap: 32 }}>
           {/* form card */}
-          <div style={{
+          <form onSubmit={onSubmit} style={{
             padding: 32, boxSizing: "border-box",
             background: "var(--surface)", border: "1px solid var(--border)",
             borderRadius: 12,
@@ -376,30 +450,30 @@ export default function SignInPage() {
               </p>
             </header>
 
-            {/* SSO */}
+            {/* SSO — not wired; backend has no SSO endpoints yet. */}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <button style={{
+              <button type="button" disabled title="SSO ships with the enterprise release" style={{
                 height: 40, display: "flex", alignItems: "center", justifyContent: "center",
                 gap: 10, padding: "0 12px",
                 border: "1px solid var(--border)", borderRadius: 8,
                 background: "var(--surface)", color: "var(--text-primary)",
-                fontSize: 14, fontWeight: 400, cursor: "pointer",
+                fontSize: 14, fontWeight: 400, cursor: "not-allowed", opacity: 0.5,
               }}>
                 <GoogleG /> Continue with Google
               </button>
-              <button style={{
+              <button type="button" disabled title="SSO ships with the enterprise release" style={{
                 height: 40, display: "flex", alignItems: "center", justifyContent: "center",
                 gap: 10, padding: "0 12px",
                 border: "1px solid var(--border)", borderRadius: 8,
                 background: "var(--surface)", color: "var(--text-primary)",
-                fontSize: 14, fontWeight: 400, cursor: "pointer",
+                fontSize: 14, fontWeight: 400, cursor: "not-allowed", opacity: 0.5,
               }}>
                 <MsSquare /> Continue with Microsoft 365
               </button>
               <div style={{
                 fontSize: 11, lineHeight: "16px", color: "var(--text-muted)",
               }}>
-                SSO available on Growth and Enterprise plans.
+                SSO is on the enterprise roadmap. For now, sign in with your firm email.
               </div>
             </div>
 
@@ -428,14 +502,17 @@ export default function SignInPage() {
                 letterSpacing: "0.06em", textTransform: "uppercase",
                 color: "var(--text-muted)",
               }}>Work email</label>
-              <input id="email" type="email" value={email}
+              <input id="email" type="email" value={email} required
+                autoComplete="email" autoFocus
                 onChange={e => setEmail(e.target.value)}
-                placeholder="priya@acmeca.in"
+                disabled={step !== "creds"}
+                placeholder="you@yourfirm.in"
                 style={{
                   height: 44, boxSizing: "border-box", padding: "0 14px",
                   border: "1px solid var(--border)", borderRadius: 10,
                   background: "var(--surface)", color: "var(--text-primary)",
                   fontSize: 14, outline: "none",
+                  opacity: step !== "creds" ? 0.6 : 1,
                 }} />
             </div>
 
@@ -447,21 +524,24 @@ export default function SignInPage() {
                   letterSpacing: "0.06em", textTransform: "uppercase",
                   color: "var(--text-muted)",
                 }}>Password</label>
-                <a href="#" style={{ fontSize: 12, fontWeight: 500, color: "var(--accent)", textDecoration: "none" }}>
+                <a href="/forgot-password" style={{ fontSize: 12, fontWeight: 500, color: "var(--accent)", textDecoration: "none" }}>
                   Forgot password?
                 </a>
               </div>
               <div style={{ position: "relative" }}>
                 <input id="password" type={show ? "text" : "password"} value={password}
+                  required autoComplete="current-password"
                   onChange={e => setPassword(e.target.value)}
+                  disabled={step !== "creds"}
                   style={{
                     width: "100%", height: 44, boxSizing: "border-box",
                     padding: "0 44px 0 14px",
                     border: "1px solid var(--border)", borderRadius: 10,
                     background: "var(--surface)", color: "var(--text-primary)",
                     fontSize: 14, outline: "none",
+                    opacity: step !== "creds" ? 0.6 : 1,
                   }} />
-                <button onClick={() => setShow(s => !s)}
+                <button type="button" onClick={() => setShow(s => !s)}
                   aria-label={show ? "Hide password" : "Show password"}
                   style={{
                     position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
@@ -479,22 +559,69 @@ export default function SignInPage() {
               </div>
             </div>
 
+            {/* TOTP field — revealed once backend requires it */}
+            {step === "totp" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 16 }}>
+                  <label htmlFor="totp" style={{
+                    fontSize: 12, lineHeight: "16px", fontWeight: 500,
+                    letterSpacing: "0.06em", textTransform: "uppercase",
+                    color: "var(--text-muted)",
+                  }}>Authenticator code</label>
+                  <button type="button" onClick={resetToCreds} style={{
+                    background: "transparent", border: "none", padding: 0,
+                    fontSize: 12, fontWeight: 500, color: "var(--accent)", cursor: "pointer",
+                  }}>
+                    Use different email
+                  </button>
+                </div>
+                <input id="totp" type="text" value={totp}
+                  inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoFocus
+                  autoComplete="one-time-code"
+                  onChange={e => setTotp(e.target.value.replace(/\D/g, ""))}
+                  placeholder="000000"
+                  style={{
+                    height: 44, boxSizing: "border-box", padding: "0 14px",
+                    border: "1px solid var(--border)", borderRadius: 10,
+                    background: "var(--surface)", color: "var(--text-primary)",
+                    fontSize: 18, outline: "none",
+                    fontFamily: "var(--font-mono-v2)",
+                    letterSpacing: "0.4em",
+                    textAlign: "center",
+                  }} />
+                <div style={{
+                  fontSize: 12, lineHeight: "16px", color: "var(--text-muted)",
+                }}>
+                  6-digit code from your authenticator app (Google Authenticator, 1Password, Authy…).
+                </div>
+              </div>
+            )}
+
+            {/* Error banner */}
+            {error && <ErrorBanner message={error} />}
+
             {/* primary CTA */}
-            <button style={{
+            <button type="submit" disabled={loading || step === "setup_required"}
+              title={step === "setup_required" ? "Open the classic /login flow to enrol TOTP, then return here." : undefined}
+              style={{
               height: 44, position: "relative",
               display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
               border: "none", borderRadius: 10,
               background: "var(--accent)", color: "#fff",
-              fontSize: 14, fontWeight: 500, cursor: "pointer",
+              fontSize: 14, fontWeight: 500,
+              cursor: loading || step === "setup_required" ? "not-allowed" : "pointer",
+              opacity: loading || step === "setup_required" ? 0.6 : 1,
             }}>
-              Continue
-              <span style={{
-                position: "absolute", right: 12,
-                padding: "1px 6px", borderRadius: 4,
-                background: "rgba(255,255,255,.18)",
-                fontSize: 11, color: "rgba(255,255,255,.85)",
-                fontFamily: "var(--font-mono-v2)",
-              }}>↵</span>
+              {loading ? "Signing in…" : step === "totp" ? "Verify & sign in" : "Continue"}
+              {!loading && (
+                <span style={{
+                  position: "absolute", right: 12,
+                  padding: "1px 6px", borderRadius: 4,
+                  background: "rgba(255,255,255,.18)",
+                  fontSize: 11, color: "rgba(255,255,255,.85)",
+                  fontFamily: "var(--font-mono-v2)",
+                }}>↵</span>
+              )}
             </button>
 
             {/* sign-up prompt */}
@@ -524,9 +651,9 @@ export default function SignInPage() {
                 v · 2026.08.13
               </div>
             </div>
-          </div>
+          </form>
 
-          {/* MFA banner */}
+          {/* MFA banner — TOTP is required for every confirmed account. */}
           <div style={{
             width: 440, minHeight: 64, padding: 16, boxSizing: "border-box",
             background: "var(--accent-panel-bg)",
@@ -536,16 +663,12 @@ export default function SignInPage() {
             <span style={{ color: "var(--accent)", flex: "none" }}><ShieldCheckSvg /></span>
             <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, lineHeight: "18px", fontWeight: 500, color: "var(--text-primary)" }}>
-                MFA is mandatory on every sign-in.
+                TOTP is mandatory on every sign-in.
               </div>
               <div style={{ fontSize: 12, lineHeight: "16px", color: "var(--text-secondary)" }}>
-                Set up TOTP or a hardware key after continuing.
+                You'll be prompted for your 6-digit authenticator code after email + password.
               </div>
             </div>
-            <a href="#" style={{
-              flex: "none", fontSize: 12, fontWeight: 500,
-              color: "var(--accent)", textDecoration: "none",
-            }}>Learn more →</a>
           </div>
         </div>
       </div>

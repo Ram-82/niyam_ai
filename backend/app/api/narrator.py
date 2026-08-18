@@ -10,7 +10,7 @@ gated by the CA-approval + delivery surfaces (P3 scope).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,7 +18,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.api.deps import get_current_user, get_firm_scoped_session
+from app.api.deps import get_current_user, get_firm_scoped_session, require_admin
 from app.models.tables import AppUser
 from app.narrator import service
 from app.narrator.facts_builder import FactsUnavailable
@@ -168,3 +168,60 @@ def get_narration_pdf(
             )
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Cost + cache-hit meter (P2.4 Step 3) — admin only
+# ---------------------------------------------------------------------------
+
+
+class NarratorCostsPerModel(BaseModel):
+    model: str
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+    estimated_usd: Optional[float]
+
+
+class NarratorCostsResp(BaseModel):
+    firm_id: str
+    month: str
+    total_calls: int
+    succeeded: int
+    failed: int
+    failures_by_kind: dict[str, int]
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+    cache_hit_rate: Optional[float]  # 0.0-100.0 percent; None if no LLM calls
+    per_model: list[NarratorCostsPerModel]
+    estimated_usd: Optional[float]  # None if any model was unpriced
+    latency_ms_p50: Optional[float]
+    latency_ms_p95: Optional[float]
+
+
+@router.get("/costs", response_model=NarratorCostsResp)
+def costs(
+    admin: AppUser = Depends(require_admin),
+    month: Optional[str] = Query(default=None, pattern=r"^\d{6}$"),
+) -> NarratorCostsResp:
+    """Aggregate cost + cache-hit metrics from ``narrator_call_log``.
+
+    Admin-only. Reads only the caller's firm (RLS enforced). Default
+    month is the current calendar month in UTC (aligns with the GSP
+    usage endpoint's semantics).
+
+    The ``cache_hit_rate`` field is the load-bearing P2.4 metric — the
+    goal is ~90% cache-read on regenerations. A low number means the
+    system prompt is being rebuilt fresh too often (invalidation event
+    every call, or too many concurrent creators overrunning the
+    ephemeral cache TTL).
+    """
+    if month is None:
+        now = datetime.now(tz=timezone.utc)
+        month = f"{now.year:04d}{now.month:02d}"
+    data = service.monthly_narrator_stats(firm_id=admin.firm_id, month=month)
+    return NarratorCostsResp(**data)

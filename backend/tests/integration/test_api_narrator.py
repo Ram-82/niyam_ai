@@ -51,12 +51,20 @@ def _gstin(base: str) -> str:
 
 
 def _seed(bootstrap: dict) -> uuid.UUID:
-    """Create a gstin_profile with a readiness snapshot (and its deps)."""
+    """Create a gstin_profile with a readiness snapshot (and its deps).
+
+    Also flips ``ca_firm.narrator_enabled=true`` — P2.4 Step 2 defaults
+    new firms to OFF (opt-in) so tests must explicitly enable the firm.
+    """
     firm_id = bootstrap["firm_id"]
     client_id = uuid.uuid4()
     gpid = uuid.uuid4()
     period = "202607"
     with owner_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE ca_firm SET narrator_enabled = true WHERE id = :fid"),
+            {"fid": firm_id},
+        )
         conn.execute(
             text(
                 "INSERT INTO client (id, firm_id, trade_name) "
@@ -194,6 +202,15 @@ def test_preview_narrator_disabled_returns_503(
 def test_preview_no_snapshot_returns_409(test_client, bootstrap_firm) -> None:
     admin = bootstrap_firm(admin_email="nar-no-snap@example.com")
     token = _login(test_client, admin)
+    # Enable narrator for this firm — we're testing the no-snapshot 409
+    # path, not the per-firm off 503 path.
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE ca_firm SET narrator_enabled = true WHERE id = :fid"
+            ),
+            {"fid": str(admin["firm_id"])},
+        )
 
     # Use a random UUID that has no seeded data.
     r = test_client.post(
@@ -340,3 +357,130 @@ def test_get_pdf_firm_isolation(test_client, bootstrap_firm) -> None:
         headers={"Authorization": f"Bearer {token_b}"},
     )
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /narrator/costs — P2.4 Step 3 admin cost + cache-hit meter
+# ---------------------------------------------------------------------------
+
+
+def test_costs_endpoint_returns_stats_for_admin(
+    test_client, bootstrap_firm
+) -> None:
+    admin = bootstrap_firm(admin_email="nar-costs@example.com")
+    gpid = _seed(admin)  # sets narrator_enabled=true
+    token = _login(test_client, admin)
+
+    # Generate one real preview so a call-log row exists.
+    r = test_client.post(
+        "/narrator/preview",
+        json={
+            "gstin_profile_id": str(gpid),
+            "period": "202607",
+            "return_type": "GSTR1",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+
+    r = test_client.get(
+        "/narrator/costs",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total_calls"] >= 1
+    assert body["succeeded"] >= 1
+    assert body["failed"] == 0
+    # Mock adapter → no LLM tokens → cache_hit_rate is None.
+    assert body["cache_hit_rate"] is None
+    # Mock provider has no price entry → estimated_usd is None.
+    assert body["estimated_usd"] is None
+    # At least one per_model row for "mock".
+    assert any(m["model"] == "template-v1" for m in body["per_model"])
+
+
+def test_costs_endpoint_month_override(test_client, bootstrap_firm) -> None:
+    admin = bootstrap_firm(admin_email="nar-costs-mo@example.com")
+    _seed(admin)
+    token = _login(test_client, admin)
+
+    r = test_client.get(
+        "/narrator/costs?month=202501",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["month"] == "202501"
+    assert body["total_calls"] == 0  # no rows in Jan 2025
+
+
+def test_costs_endpoint_rejects_bad_month(test_client, bootstrap_firm) -> None:
+    admin = bootstrap_firm(admin_email="nar-costs-bad@example.com")
+    _seed(admin)
+    token = _login(test_client, admin)
+
+    r = test_client.get(
+        "/narrator/costs?month=notamonth",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    # FastAPI Query validation catches the pattern before we hit the handler.
+    assert r.status_code == 422
+
+
+def test_costs_endpoint_requires_admin(test_client, bootstrap_firm) -> None:
+    """Staff cannot see cost data — only admins."""
+    from app.auth.passwords import hash_password
+    from app.auth.totp import generate_secret
+
+    admin = bootstrap_firm(admin_email=f"nar-cost-adm-{uuid.uuid4().hex[:6]}@example.com")
+    _seed(admin)
+
+    staff_id = uuid.uuid4()
+    staff_secret = generate_secret()
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO app_user (
+                    id, firm_id, email, password_hash, role,
+                    totp_secret, totp_confirmed
+                ) VALUES (
+                    :id, :fid, :email, :ph, 'staff',
+                    :ts, true
+                )
+                """
+            ),
+            {
+                "id": staff_id,
+                "fid": admin["firm_id"],
+                "email": f"nar-cost-staff-{uuid.uuid4().hex[:6]}@example.com",
+                "ph": hash_password("pw123!Aa"),
+                "ts": staff_secret,
+            },
+        )
+        staff_email = conn.execute(
+            text("SELECT email FROM app_user WHERE id = :id"), {"id": staff_id}
+        ).scalar_one()
+
+    r = test_client.post(
+        "/auth/login",
+        json={
+            "email": staff_email,
+            "password": "pw123!Aa",
+            "totp_code": pyotp.TOTP(staff_secret).now(),
+        },
+    )
+    assert r.status_code == 200, r.text
+    staff_tok = r.json()["access_token"]
+
+    r = test_client.get(
+        "/narrator/costs",
+        headers={"Authorization": f"Bearer {staff_tok}"},
+    )
+    assert r.status_code == 403
+
+
+def test_costs_endpoint_requires_auth(test_client) -> None:
+    r = test_client.get("/narrator/costs")
+    assert r.status_code == 401

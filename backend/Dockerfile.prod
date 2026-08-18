@@ -50,7 +50,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     NIYAM_LOG_LEVEL=INFO
 
 # Runtime-only libs: libpq for psycopg + cairo/pango for WeasyPrint PDF
-# rendering + fonts for the 2-pager vernacular templates. No compiler.
+# rendering + fonts for the 2-pager vernacular templates + tesseract +
+# poppler for the OCR adapters (P2.1 Step 3a/3b). No compiler.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \
         libcairo2 \
@@ -60,6 +61,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         shared-mime-info \
         fonts-noto-core \
         fonts-indic \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        poppler-utils \
         curl \
     && rm -rf /var/lib/apt/lists/*
 

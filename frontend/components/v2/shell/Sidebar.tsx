@@ -27,7 +27,7 @@ const primaryNav: NavItem[] = [
   { href: "/v2/calendar", label: "Compliance Calendar", icon: <CalendarCheckIcon /> },
   { href: "/v2/clients", label: "Clients", icon: <UsersIcon />, count: "142" },
   { href: "/v2/filings", label: "Filings", icon: <FileTextIcon /> },
-  { href: "/v2/documents", label: "Documents", icon: <FolderOpenIcon /> },
+  { href: "/v2/contracts", label: "Documents", icon: <FolderOpenIcon /> },
   { href: "/v2/ai-assistant", label: "AI Assistant", icon: <SparklesIcon /> },
   { href: "/v2/reports", label: "Reports", icon: <BarChart3Icon /> },
 ];

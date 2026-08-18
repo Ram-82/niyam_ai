@@ -1,11 +1,23 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   SunIcon, MoonIcon, ChevronDownIcon, UploadIcon,
   FileTextIcon, XIcon, CheckCircleIcon, AlertTriangleIcon,
   SparklesIcon, SearchIcon, ArrowUpRightIcon,
 } from "@/components/v2/icons";
+import { ErrorBanner } from "@/components/v2/ui/ErrorBanner";
+import {
+  useOnboardingData,
+  buildSteps,
+  completedCount,
+  nameFromEmail,
+  initialsFrom,
+  type OnboardingStep,
+} from "./useOnboardingData";
+import { useCsvImport, IMPORT_FIELDS, type ImportResponse } from "./useCsvImport";
+import { useRef } from "react";
 
 /* --- inline SVGs ---------------------------------------------------------- */
 
@@ -145,7 +157,7 @@ function StepRow({ step, last }: { step: Step; last: boolean }) {
 
 /* --- top nav -------------------------------------------------------------- */
 
-function Nav({ theme, toggleTheme }: { theme: "light" | "dark"; toggleTheme: () => void }) {
+function Nav({ theme, toggleTheme, email, onExit }: { theme: "light" | "dark"; toggleTheme: () => void; email: string | null; onExit: () => void }) {
   return (
     <div style={{
       position: "absolute", top: 32, left: 32, right: 32, zIndex: 3,
@@ -170,19 +182,19 @@ function Nav({ theme, toggleTheme }: { theme: "light" | "dark"; toggleTheme: () 
       </a>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          Signed in as priya@acmeca.in
+          {email ? `Signed in as ${email}` : "Loading account…"}
         </div>
         <div style={{ width: 1, height: 20, background: "var(--border)" }} />
-        <button style={{
+        <button disabled title="Help center — coming soon" style={{
           height: 32, display: "flex", alignItems: "center", gap: 6,
           padding: "0 10px", border: "1px solid var(--border)",
           borderRadius: 8, background: "var(--surface)",
           fontSize: 12, fontWeight: 500, color: "var(--text-secondary)",
-          cursor: "pointer",
+          cursor: "not-allowed", opacity: 0.5,
         }}>
           <InfoSvg size={14} /> Help ↗
         </button>
-        <button style={{
+        <button onClick={onExit} style={{
           height: 32, padding: "0 12px",
           border: "1px solid var(--border)", borderRadius: 8,
           background: "var(--surface)",
@@ -479,8 +491,22 @@ function ValidationCard() {
 /* --- page ---------------------------------------------------------------- */
 
 export default function OnboardingPage() {
+  const router = useRouter();
   const [method, setMethod] = useState<"csv" | "manual">("csv");
   const [theme, setTheme] = useState<"light" | "dark">("light");
+
+  const { me, firm, clients, users, invites, gsp, loading, error, reload } = useOnboardingData();
+  const importState = useCsvImport(reload);
+  const steps = buildSteps(firm, clients, users, invites, gsp);
+  const done = completedCount(steps);
+  const progressPct = Math.round((done / steps.length) * 100);
+  const firmName = firm?.name ?? null;
+  const firmInitials = firmName ? initialsFrom(firmName) : "…";
+  const activeStepIdx = steps.findIndex((s) => s.state === "active");
+  const activeStep = activeStepIdx >= 0 ? steps[activeStepIdx] : steps[3]; // fallback: import step
+  const clientCount = clients?.length ?? 0;
+
+  const goDashboard = () => router.push("/v2/dashboard");
 
   const toggleTheme = () => {
     const next = theme === "light" ? "dark" : "light";
@@ -499,7 +525,7 @@ export default function OnboardingPage() {
       minHeight: "100vh", display: "flex", alignItems: "stretch",
       background: "var(--bg)", position: "relative",
     }}>
-      <Nav theme={theme} toggleTheme={toggleTheme} />
+      <Nav theme={theme} toggleTheme={toggleTheme} email={me?.email ?? null} onExit={goDashboard} />
 
       {/* sidebar */}
       <aside style={{
@@ -514,27 +540,27 @@ export default function OnboardingPage() {
               background: "var(--accent-soft)", color: "var(--accent)",
               display: "grid", placeItems: "center",
               fontSize: 14, fontWeight: 600, letterSpacing: "0.02em",
-            }}>AC</div>
+            }}>{firmInitials}</div>
             <div style={{ display: "flex", flexDirection: "column" }}>
               <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Setting up</div>
               <div style={{ fontSize: 18, fontWeight: 600, color: "var(--text-primary)" }}>
-                Acme CA workspace
+                {firmName ? `${firmName} workspace` : loading ? "Loading firm…" : "This firm"}
               </div>
             </div>
           </div>
           <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-secondary)" }}>
-            3 of 6 steps complete · about 4 minutes left
+            {done} of {steps.length} steps complete
           </div>
           <div style={{
             marginTop: 8, height: 4, borderRadius: 999,
             background: "var(--border)", overflow: "hidden",
           }}>
-            <div style={{ width: "50%", height: 4, background: "var(--accent)" }} />
+            <div style={{ width: `${progressPct}%`, height: 4, background: "var(--accent)" }} />
           </div>
         </div>
         <div style={{ padding: "24px 24px 8px", flex: 1, display: "flex", flexDirection: "column" }}>
-          {STEPS.map((s, i) => (
-            <StepRow key={s.n} step={s} last={i === STEPS.length - 1} />
+          {steps.map((s, i) => (
+            <StepRow key={s.n} step={s} last={i === steps.length - 1} />
           ))}
         </div>
         <div style={{
@@ -568,33 +594,62 @@ export default function OnboardingPage() {
               <div style={{
                 fontSize: 11, fontWeight: 500, textTransform: "uppercase",
                 letterSpacing: "0.06em", color: "var(--text-muted)",
-              }}>Step 4 of 6</div>
-              <a href="#" style={{
+              }}>Step {activeStep.n} of {steps.length}</div>
+              <button type="button" onClick={goDashboard} style={{
+                background: "transparent", border: "none", padding: 0,
                 fontSize: 12, fontWeight: 500,
-                color: "var(--text-secondary)", textDecoration: "none",
-              }}>Skip this step for now →</a>
+                color: "var(--text-secondary)", cursor: "pointer",
+              }}>Skip this step for now →</button>
             </div>
             <h1 style={{
               margin: "8px 0 0 0", fontSize: 32, lineHeight: "40px",
               fontWeight: 600, letterSpacing: "-0.02em", color: "var(--text-primary)",
-            }}>Import your first client</h1>
+            }}>{activeStep.title}</h1>
             <p style={{
               margin: "12px 0 0 0", maxWidth: 640,
               fontSize: 14, lineHeight: "20px", color: "var(--text-secondary)",
             }}>
-              Upload a CSV of clients or add a single client manually. Niyam auto-detects
-              GSTIN, PAN, state, and business type. You can import as many CSVs as you like after setup.
+              {activeStep.sub}. Add clients from the Clients screen once you're inside — bulk CSV
+              import with column mapping is on the roadmap.
             </p>
 
-            {/* method cards */}
+            {/* Scope notice — CSV import mechanics below are a design placeholder. */}
+            <div style={{
+              marginTop: 16, padding: "10px 12px",
+              background: "var(--accent-soft)", color: "var(--text-primary)",
+              border: "1px solid var(--accent-panel-border, var(--border))",
+              borderRadius: 10, fontSize: 12, lineHeight: "18px",
+              display: "flex", alignItems: "flex-start", gap: 10,
+            }}>
+              <span style={{ color: "var(--accent)", marginTop: 1 }}><InfoSvg size={14} /></span>
+              <span>
+                <strong style={{ fontWeight: 600 }}>Bulk CSV import is live.</strong>{" "}
+                Upload a CSV of clients — Niyam auto-detects your columns, previews the rows, and
+                reports any errors before you commit. The old design mocks (mapping table, preview
+                card, validation card) have been replaced with the real flow below.
+                {clientCount > 0 ? ` You already have ${clientCount} client${clientCount === 1 ? "" : "s"}.` : ""}
+              </span>
+            </div>
+
+            {error && (
+              <div style={{ marginTop: 12 }}>
+                <ErrorBanner message={`Failed to load onboarding state — ${error}`} onRetry={reload} />
+              </div>
+            )}
+
+            {/* method cards — CSV upload is live; "Add manually" still points at the Clients screen. */}
             <div style={{ marginTop: 32, display: "flex", gap: 12 }}>
-              <button onClick={() => setMethod("csv")} style={{
-                flex: 1, minHeight: 96, padding: method === "csv" ? 16 : 17, textAlign: "left",
-                background: method === "csv" ? "var(--accent-panel-bg)" : "var(--surface)",
-                border: method === "csv" ? "2px solid var(--accent)" : "1px solid var(--border)",
-                borderRadius: 10, cursor: "pointer",
-                display: "flex", flexDirection: "column", gap: 8, position: "relative",
-              }}>
+              <button
+                type="button"
+                onClick={() => { setMethod("csv"); }}
+                title="Bulk CSV upload with auto-mapping"
+                style={{
+                  flex: 1, minHeight: 96, padding: method === "csv" ? 16 : 17, textAlign: "left",
+                  background: method === "csv" ? "var(--accent-panel-bg)" : "var(--surface)",
+                  border: method === "csv" ? "2px solid var(--accent)" : "1px solid var(--border)",
+                  borderRadius: 10, cursor: "pointer",
+                  display: "flex", flexDirection: "column", gap: 8, position: "relative",
+                }}>
                 {method === "csv" && (
                   <span style={{
                     position: "absolute", top: 12, right: 12,
@@ -608,14 +663,14 @@ export default function OnboardingPage() {
                   Upload CSV
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                  Fastest for firms migrating from Excel or another tool. Supports 5,000 rows per file.
+                  Fastest for firms migrating from Excel or another tool. Up to 5 MB per file.
                 </div>
               </button>
-              <button onClick={() => setMethod("manual")} style={{
+              <button disabled title="Add clients from the Clients screen" style={{
                 flex: 1, minHeight: 96, padding: method === "manual" ? 16 : 17, textAlign: "left",
                 background: method === "manual" ? "var(--accent-panel-bg)" : "var(--surface)",
                 border: method === "manual" ? "2px solid var(--accent)" : "1px solid var(--border)",
-                borderRadius: 10, cursor: "pointer",
+                borderRadius: 10, cursor: "not-allowed", opacity: 0.55,
                 display: "flex", flexDirection: "column", gap: 8,
               }}>
                 <span style={{ color: method === "manual" ? "var(--accent)" : "var(--text-secondary)" }}>
@@ -630,65 +685,10 @@ export default function OnboardingPage() {
               </button>
             </div>
 
-            {/* upload container */}
-            <div style={{
-              marginTop: 24, minHeight: 240, padding: 24,
-              background: "var(--surface)",
-              border: "2px dashed var(--border-strong)", borderRadius: 12,
-              display: "flex", flexDirection: "column", justifyContent: "center", gap: 12,
-            }}>
-              <div style={{
-                minHeight: 96, padding: 20, background: "var(--surface)",
-                border: "1px solid var(--border)", borderRadius: 10,
-                display: "flex", alignItems: "center", gap: 16,
-              }}>
-                <div style={{
-                  width: 40, height: 40, borderRadius: 10,
-                  background: "var(--accent-soft)", color: "var(--accent)",
-                  display: "grid", placeItems: "center", flex: "none",
-                }}>
-                  <FileTextIcon size={20} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-                  <div style={{
-                    fontSize: 14, fontWeight: 500, color: "var(--text-primary)",
-                    fontFamily: "var(--font-mono-v2)",
-                  }}>
-                    clients-migration-aug2026.csv
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    48 rows detected · 12 columns · uploaded 34 seconds ago
-                  </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flex: "none" }}>
-                  <a href="#" style={{ fontSize: 12, fontWeight: 500, color: "var(--accent)", textDecoration: "none" }}>Preview</a>
-                  <a href="#" style={{ fontSize: 12, fontWeight: 500, color: "var(--accent)", textDecoration: "none" }}>Replace file</a>
-                  <button style={{
-                    width: 32, height: 32, borderRadius: 8, border: "none",
-                    background: "transparent", cursor: "pointer",
-                    color: "var(--text-muted)", display: "grid", placeItems: "center",
-                  }}>
-                    <XIcon size={16} />
-                  </button>
-                </div>
-              </div>
-              <div style={{
-                display: "flex", alignItems: "center", gap: 6,
-                fontSize: 12, color: "var(--text-muted)",
-              }}>
-                Not sure of the format?
-                <a href="#" style={{ fontWeight: 500, color: "var(--accent)", textDecoration: "none" }}>
-                  Download a sample CSV ↓
-                </a>
-              </div>
-            </div>
-
-            <MappingTable />
-
-            <div style={{ marginTop: 24, display: "flex", gap: 12 }}>
-              <PreviewCard />
-              <ValidationCard />
-            </div>
+            <ImportPanel state={importState} />
+            {/* MappingTable / PreviewCard / ValidationCard hidden — they were
+             * design mocks. Real mapping + preview + errors live inside the
+             * ImportPanel above. */}
 
             {/* info banner */}
             <div style={{
@@ -722,37 +722,32 @@ export default function OnboardingPage() {
             maxWidth: 800, margin: "0 auto", width: "100%",
             display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24,
           }}>
-            <a href="#" style={{
+            <button type="button" onClick={goDashboard} style={{
+              background: "transparent", border: "none", padding: 0,
               fontSize: 12, fontWeight: 500,
-              color: "var(--text-secondary)", textDecoration: "none",
+              color: "var(--text-secondary)", cursor: "pointer",
             }}>
-              ← Back to Step 3
-            </a>
-            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>Autosaved 8s ago</div>
+              ← Back to dashboard
+            </button>
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              {loading ? "Loading firm state…" : `Signed in · ${done}/${steps.length} steps complete`}
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <a href="#" style={{
+              <button type="button" onClick={goDashboard} style={{
+                background: "transparent", border: "none", padding: 0,
                 fontSize: 12, fontWeight: 500,
-                color: "var(--text-secondary)", textDecoration: "none",
+                color: "var(--text-secondary)", cursor: "pointer",
               }}>
                 Skip this step
-              </a>
-              <button style={{
-                height: 40, padding: "0 16px",
-                border: "1px solid var(--border)", borderRadius: 8,
-                background: "var(--surface)",
-                fontSize: 13, fontWeight: 500, color: "var(--text-primary)",
-                cursor: "pointer",
-              }}>
-                Add 1 more mapping
               </button>
-              <button style={{
+              <button type="button" onClick={goDashboard} style={{
                 height: 40, padding: "0 16px", position: "relative",
                 display: "flex", alignItems: "center", gap: 8,
                 border: "none", borderRadius: 10,
                 background: "var(--accent)", color: "#fff",
                 fontSize: 14, fontWeight: 500, cursor: "pointer",
               }}>
-                Import 44 clients &amp; continue
+                {clientCount > 0 ? `Continue with ${clientCount} client${clientCount === 1 ? "" : "s"}` : "Continue to dashboard"}
                 <ArrowUpRightIcon size={14} />
                 <span style={{
                   padding: "1px 6px", borderRadius: 4,
@@ -765,6 +760,277 @@ export default function OnboardingPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* --------------------------------- ImportPanel ------------------------------- */
+
+function ImportPanel({ state }: { state: ReturnType<typeof useCsvImport> }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const { file, result, loading, error, committed, pickFile, updateMapping, commit, reset } = state;
+
+  const validRows = result ? result.total_rows - result.errors.length : 0;
+
+  return (
+    <div style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* File picker */}
+      <div style={{
+        minHeight: 96, padding: 20,
+        background: "var(--surface)",
+        border: file ? "1px solid var(--border)" : "2px dashed var(--border-strong)",
+        borderRadius: 12,
+        display: "flex", alignItems: "center", gap: 16,
+      }}>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".csv,text/csv,text/plain"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void pickFile(f);
+            e.target.value = "";
+          }}
+        />
+        {file ? (
+          <>
+            <div style={{
+              width: 40, height: 40, borderRadius: 10,
+              background: "var(--accent-soft)", color: "var(--accent)",
+              display: "grid", placeItems: "center", flex: "none",
+            }}>
+              <FileTextIcon size={20} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+              <div style={{
+                fontSize: 14, fontWeight: 500, color: "var(--text-primary)",
+                fontFamily: "var(--font-mono-v2)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {file.name}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                {result ? `${result.total_rows} rows · ${result.column_headers.length} columns` : "Reading…"}
+                {" · "}{(file.size / 1024).toFixed(1)} KB
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flex: "none" }}>
+              <button type="button" onClick={() => fileRef.current?.click()} style={{
+                background: "transparent", border: "none",
+                fontSize: 12, fontWeight: 500, color: "var(--accent)", cursor: "pointer",
+              }}>Replace file</button>
+              <button type="button" onClick={reset} aria-label="Remove file" style={{
+                width: 32, height: 32, borderRadius: 8, border: "none",
+                background: "transparent", cursor: "pointer",
+                color: "var(--text-muted)", display: "grid", placeItems: "center",
+              }}>
+                <XIcon size={16} />
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{
+              width: 40, height: 40, borderRadius: 10,
+              background: "var(--row-hover)", color: "var(--text-muted)",
+              display: "grid", placeItems: "center", flex: "none",
+            }}>
+              <UploadIcon size={20} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)" }}>
+                Choose a CSV to upload
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                Required column: <span className="mono">trade_name</span> (or Client Name / Name / Legal name).
+                Optional: gstin, state_code, scheme, language, whatsapp_number.
+              </div>
+            </div>
+            <button type="button" onClick={() => fileRef.current?.click()} style={{
+              flex: "none", height: 36, padding: "0 14px",
+              border: "1px solid var(--accent)", borderRadius: 8,
+              background: "var(--accent)", color: "#fff",
+              fontSize: 13, fontWeight: 500, cursor: "pointer",
+            }}>
+              Choose file
+            </button>
+          </>
+        )}
+      </div>
+
+      {error && <ErrorBanner message={`Import failed — ${error}`} onRetry={file ? () => void pickFile(file) : undefined} />}
+
+      {result && (
+        <>
+          <MappingEditor
+            headers={result.column_headers}
+            mapping={result.resolved_mapping}
+            onChange={(m) => void updateMapping(m)}
+            disabled={loading || committed}
+          />
+          <ImportSummary result={result} validRows={validRows} />
+          {result.errors.length > 0 && (
+            <ImportErrorList title="Errors — these rows will be skipped" items={result.errors} tone="danger" />
+          )}
+          {result.warnings.length > 0 && (
+            <ImportErrorList title="Warnings" items={result.warnings} tone="warning" />
+          )}
+          {!committed && validRows > 0 && (
+            <button
+              type="button"
+              onClick={() => void commit()}
+              disabled={loading}
+              style={{
+                alignSelf: "flex-start",
+                height: 40, padding: "0 16px",
+                border: "none", borderRadius: 10,
+                background: "var(--accent)", color: "#fff",
+                fontSize: 14, fontWeight: 500,
+                cursor: loading ? "not-allowed" : "pointer",
+                opacity: loading ? 0.6 : 1,
+              }}
+            >
+              {loading ? "Importing…" : `Import ${validRows} client${validRows === 1 ? "" : "s"}`}
+            </button>
+          )}
+          {committed && (
+            <div style={{
+              padding: "10px 14px",
+              background: "var(--success-soft)", color: "var(--success)",
+              border: "1px solid var(--success)", borderRadius: 10,
+              fontSize: 13,
+            }}>
+              Imported {result.created_clients} client{result.created_clients === 1 ? "" : "s"}
+              {result.created_gstins > 0 && ` (${result.created_gstins} GSTIN${result.created_gstins === 1 ? "" : "s"})`}
+              . You're good to continue.
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function MappingEditor({
+  headers, mapping, onChange, disabled,
+}: {
+  headers: string[];
+  mapping: Record<string, string>;
+  onChange: (m: Record<string, string>) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div style={{
+      border: "1px solid var(--border)", borderRadius: 10,
+      background: "var(--surface)", overflow: "hidden",
+    }}>
+      <div style={{
+        padding: "12px 16px", borderBottom: "1px solid var(--border)",
+        fontSize: 13, fontWeight: 500, color: "var(--text-primary)",
+      }}>
+        Match your columns
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+        {headers.map((h) => (
+          <div key={h} style={{
+            padding: "10px 16px", borderTop: "1px solid var(--border)",
+            display: "flex", alignItems: "center", gap: 12,
+          }}>
+            <span className="mono" style={{
+              flex: 1, minWidth: 0, fontSize: 13,
+              color: "var(--text-primary)",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {h}
+            </span>
+            <select
+              value={mapping[h] ?? ""}
+              disabled={disabled}
+              onChange={(e) => {
+                const next = { ...mapping };
+                if (e.target.value) next[h] = e.target.value;
+                else delete next[h];
+                onChange(next);
+              }}
+              style={{
+                flex: 1, height: 30, padding: "0 8px",
+                border: "1px solid var(--border)", borderRadius: 6,
+                background: "var(--surface)", color: "var(--text-primary)",
+                fontSize: 12, cursor: disabled ? "not-allowed" : "pointer",
+              }}
+            >
+              <option value="">— skip this column —</option>
+              {IMPORT_FIELDS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}{f.required ? " (required)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ImportSummary({ result, validRows }: { result: ImportResponse; validRows: number }) {
+  return (
+    <div style={{
+      display: "flex", gap: 12, padding: 12,
+      border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)",
+    }}>
+      <SummaryCell label="Total rows" value={String(result.total_rows)} />
+      <SummaryCell label="Ready to import" value={String(validRows)} tone={validRows > 0 ? "var(--success)" : undefined} />
+      <SummaryCell label="Errors" value={String(result.errors.length)} tone={result.errors.length > 0 ? "var(--danger)" : undefined} />
+      <SummaryCell label="Warnings" value={String(result.warnings.length)} tone={result.warnings.length > 0 ? "var(--warning)" : undefined} />
+    </div>
+  );
+}
+
+function SummaryCell({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+      <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)", fontWeight: 500 }}>
+        {label}
+      </span>
+      <span className="tabular" style={{ fontSize: 20, fontWeight: 600, color: tone ?? "var(--text-primary)" }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function ImportErrorList({ title, items, tone }: {
+  title: string;
+  items: { row: number; message: string }[];
+  tone: "danger" | "warning";
+}) {
+  const bg = tone === "danger" ? "var(--danger-soft)" : "var(--warning-soft)";
+  const fg = tone === "danger" ? "var(--danger)" : "var(--warning)";
+  return (
+    <div style={{
+      padding: 12,
+      background: bg,
+      border: `1px solid ${fg}`,
+      borderRadius: 10,
+    }}>
+      <div style={{
+        fontSize: 12, fontWeight: 600, textTransform: "uppercase",
+        letterSpacing: "0.06em", color: fg, marginBottom: 6,
+      }}>
+        {title} · {items.length}
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12, lineHeight: "20px", color: "var(--text-primary)" }}>
+        {items.slice(0, 8).map((it, i) => (
+          <li key={i}><strong>Row {it.row}:</strong> {it.message}</li>
+        ))}
+        {items.length > 8 && (
+          <li style={{ color: "var(--text-muted)", listStyle: "none", marginTop: 4 }}>
+            …and {items.length - 8} more
+          </li>
+        )}
+      </ul>
     </div>
   );
 }
