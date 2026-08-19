@@ -7,13 +7,9 @@ import {
   ArrowUpRightIcon,
   CheckCircleIcon,
   ChevronDownIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  DownloadIcon,
   FileTextIcon,
   MessageSquareIcon,
   MoreHorizontalIcon,
-  PlusIcon,
   SearchIcon,
 } from "@/components/v2/icons";
 import { ErrorBanner } from "@/components/v2/ui/ErrorBanner";
@@ -122,9 +118,7 @@ function ScopeNotice() {
       <span>
         <strong style={{ fontWeight: "var(--fw-semi)" }}>Contract-clause analysis ships in a future release.</strong>{" "}
         Today this pane displays OCR extractions this firm has captured from GST invoices. Each row is one uploaded
-        document; the analysis panel on the right lists per-field extraction results and confidence scores. The
-        document preview on the left is a design placeholder — PDF rendering with clause coordinates lands with the
-        contracts backend.
+        document; the analysis panel on the right lists per-field extraction results and confidence scores.
       </span>
     </div>
   );
@@ -310,107 +304,19 @@ function SevPill({ sev, count }: { sev: Sev; count: number }) {
 function DocViewer({ selectedFilename }: { selectedFilename: string | null }) {
   return (
     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--bg)", borderRight: "1px solid var(--border)" }}>
-      <Toolbar />
-      <div style={{ flex: 1, overflow: "auto", padding: 32, display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 780,
-            padding: "10px 14px",
-            background: "var(--surface)",
-            border: "1px dashed var(--border-strong)",
-            borderRadius: "var(--radius-app-card)",
-            fontSize: 12,
-            color: "var(--text-muted)",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <FileTextIcon size={14} />
-          <span>
-            {selectedFilename
-              ? `Preview for “${selectedFilename}” — PDF rendering not yet wired. See the panel on the right for extracted fields.`
-              : "Preview area — select an extraction on the right to see its filename here. Live PDF rendering ships with the contracts backend."}
-          </span>
-        </div>
-        <PaperPage />
-      </div>
-      <Footer />
-    </div>
-  );
-}
-
-function Toolbar() {
-  return (
-    <div
-      style={{
-        height: 48,
-        flex: "none",
-        boxSizing: "border-box",
-        padding: "0 16px",
-        borderBottom: "1px solid var(--border)",
-        background: "var(--surface)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <IconBtn aria-label="Previous page" disabled><ChevronLeftIcon size={14} /></IconBtn>
-        <span
-          style={{
-            height: 28,
-            padding: "0 10px",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-input)",
-            background: "var(--surface)",
-            color: "var(--text-muted)",
-            fontSize: 12,
-            fontWeight: "var(--fw-medium)",
-          }}
-        >
-          Page — of —
-          <ChevronDownIcon size={12} />
+      <div style={{ flex: 1, overflow: "auto", padding: 48, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
+        <FileTextIcon size={32} style={{ color: "var(--text-muted)" }} />
+        <span style={{ fontSize: 14, fontWeight: "var(--fw-medium)", color: "var(--text-primary)" }}>
+          PDF preview not yet wired
         </span>
-        <IconBtn aria-label="Next page" disabled><ChevronRightIcon size={14} /></IconBtn>
-        <span style={{ width: 1, height: 20, background: "var(--border)", margin: "0 4px" }} />
-        <IconBtn aria-label="Zoom out" disabled><span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-muted)" }}>−</span></IconBtn>
-        <span className="tabular" style={{ fontSize: 12, fontWeight: "var(--fw-medium)", color: "var(--text-muted)", width: 40, textAlign: "center" }}>—</span>
-        <IconBtn aria-label="Zoom in" disabled><PlusIcon size={14} /></IconBtn>
-        <span style={{ width: 1, height: 20, background: "var(--border)", margin: "0 4px" }} />
-        <div
-          className="v2-search-wrap"
-          style={{
-            width: 240, boxSizing: "border-box", height: 28,
-            display: "flex", alignItems: "center", gap: 6,
-            padding: "0 8px",
-            border: "1px solid var(--border-strong)",
-            borderRadius: "var(--radius-input)",
-            background: "var(--bg)",
-            opacity: 0.6,
-          }}
-        >
-          <SearchIcon size={14} style={{ color: "var(--text-muted)" }} />
-          <input
-            type="text"
-            placeholder="Search in document (coming soon)"
-            disabled
-            style={{
-              flex: 1, minWidth: 0, border: 0, outline: 0, background: "transparent",
-              font: `400 12px/16px var(--font-sans-v2)`, color: "var(--text-primary)",
-            }}
-          />
-        </div>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <IconBtn aria-label="Thumbnails" disabled><MoreHorizontalIcon size={16} /></IconBtn>
-        <IconBtn aria-label="Outline" disabled><FileTextIcon size={16} /></IconBtn>
-        <IconBtn aria-label="Download" disabled><DownloadIcon size={16} /></IconBtn>
+        <span style={{ fontSize: 13, color: "var(--text-secondary)", textAlign: "center", maxWidth: 420 }}>
+          {selectedFilename
+            ? <>Selected: <span className="mono" style={{ color: "var(--text-primary)" }}>{selectedFilename}</span>. See the panel on the right for extracted fields.</>
+            : "Select an extraction on the right to see the source filename here."}
+        </span>
+        <span style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+          Live PDF rendering with clause coordinates ships with the contracts backend.
+        </span>
       </div>
     </div>
   );
@@ -439,84 +345,6 @@ function IconBtn({ children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonEle
 }
 
 /* --------------------------------- Paper page (decorative) --------------------------------- */
-
-/* Kept as a design placeholder so the layout doesn't feel empty. Content is
- * the original Figma-port lorem: does NOT reflect the real uploaded PDF. */
-
-function PaperPage() {
-  return (
-    <div
-      style={{
-        width: "100%",
-        maxWidth: 780,
-        background: "var(--surface)",
-        boxShadow: "var(--shadow-paper)",
-        borderRadius: 4,
-        padding: 56,
-        display: "flex",
-        flexDirection: "column",
-        gap: 16,
-        position: "relative",
-        opacity: 0.75,
-      }}
-    >
-      <span style={{ fontSize: 10, color: "var(--text-muted)", textAlign: "right", marginBottom: 12 }}>
-        Design placeholder · not a live document
-      </span>
-
-      <h2 style={sectionHeadingStyle}>Sample section heading</h2>
-      <p style={paraStyle}>
-        This viewer will render the real uploaded PDF once the contracts backend ships. Until then, the
-        analysis panel on the right shows live OCR-extracted fields for every document uploaded through the
-        firm's OCR pipeline. Select a card on the right to link it to this pane.
-      </p>
-      <p style={paraStyle}>
-        Lower-confidence extractions surface as "Low conf" — the CA should verify those fields against the
-        source invoice before accepting the extraction. Verified extractions materialise as Invoice rows in
-        the ledger and feed the reconciliation engine.
-      </p>
-    </div>
-  );
-}
-
-const sectionHeadingStyle: CSSProperties = {
-  margin: 0,
-  fontSize: 15,
-  lineHeight: "22px",
-  fontWeight: "var(--fw-semi)",
-  color: "var(--text-primary)",
-  letterSpacing: "0.01em",
-};
-
-const paraStyle: CSSProperties = {
-  margin: 0,
-  fontSize: 14,
-  lineHeight: "22px",
-  color: "var(--text-primary)",
-};
-
-/* --------------------------------- Footer (minimap) --------------------------------- */
-
-function Footer() {
-  return (
-    <div
-      style={{
-        height: 48,
-        flex: "none",
-        boxSizing: "border-box",
-        padding: "0 16px",
-        borderTop: "1px solid var(--border)",
-        background: "var(--surface)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 24,
-      }}
-    >
-      <span className="tabular" style={{ fontSize: 12, color: "var(--text-muted)" }}>Live doc navigation — coming soon</span>
-    </div>
-  );
-}
 
 /* --------------------------------- Analysis panel --------------------------------- */
 

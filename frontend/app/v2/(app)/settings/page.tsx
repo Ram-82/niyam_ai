@@ -40,35 +40,6 @@ type Member = {
   isOwner?: boolean;
 };
 
-// Fallback demo data — only rendered if backend fetch failed and we
-// have nothing to show. Real data comes from useSettingsData.
-const MEMBERS: Member[] = [
-  { name: "Arjun Desai", initials: "AD", email: "arjun@acmeca.in", role: "Owner",
-    scopeMain: "142 clients", scopeMeta: "all clients", lastActive: "2 min ago",
-    mfa: "Yubikey", status: { label: "Active", kind: "active" }, isOwner: true },
-  { name: "Priya Mehta", initials: "PM", email: "priya@acmeca.in", role: "Admin",
-    scopeMain: "142 clients", scopeMeta: "all clients", lastActive: "12 min ago",
-    mfa: "TOTP", status: { label: "Active", kind: "active" } },
-  { name: "Rohit Sen", initials: "RS", email: "rohit@acmeca.in", role: "Partner",
-    scopeMain: "46 clients", scopeMeta: "assigned", lastActive: "1h ago",
-    mfa: "TOTP", status: { label: "Active", kind: "active" } },
-  { name: "Kavya Suresh", initials: "KS", email: "kavya@acmeca.in", role: "Manager",
-    scopeMain: "62 clients", scopeMeta: "assigned", lastActive: "4h ago",
-    mfa: "TOTP", status: { label: "Active", kind: "active" } },
-  { name: "Neha Gupta", initials: "NG", email: "neha@acmeca.in", role: "Manager",
-    scopeMain: "38 clients", scopeMeta: "manual list", lastActive: "yesterday",
-    mfa: "Not set", status: { label: "Setup pending", kind: "pending" } },
-  { name: "Vikram Hegde", initials: "VH", email: "vikram@acmeca.in", role: "Associate",
-    scopeMain: "24 clients", scopeMeta: "assigned", lastActive: "3d ago",
-    mfa: "Not set", status: { label: "Setup pending", kind: "pending" } },
-  { name: "Isha Sinha", initials: "IS", email: "isha@acmeca.in", role: "Associate",
-    scopeMain: "18 clients", scopeMeta: "manual list", lastActive: "12d ago",
-    mfa: "TOTP", status: { label: "Inactive 12d", kind: "inactive" } },
-  { name: "external@ramesh.co.in", initials: "EX", email: "external@ramesh.co.in", subtitle: "client accountant",
-    role: "External", scopeMain: "1 client", scopeMeta: "Ramesh Textiles Pvt Ltd",
-    lastActive: "never", mfa: "—", status: { label: "Invited · 2h", kind: "invited" } },
-];
-
 const NAV_GROUPS: { label: string; links: { label: string; active?: boolean }[] }[] = [
   { label: "Account", links: [
     { label: "Profile" },
@@ -142,7 +113,7 @@ export default function SettingsPage() {
 
   return (
     <div style={{ display: "flex", flex: 1, minWidth: 0, minHeight: 0, background: "var(--bg)" }}>
-      <SettingsNav />
+      <SettingsNav firm={firm} memberCount={seats.used + seats.pending} />
       <main style={{ flex: 1, minWidth: 0, overflow: "auto", padding: 32 }}>
         <div style={{ maxWidth: 960, display: "flex", flexDirection: "column", gap: 24 }}>
           <SectionHeader firm={firm} />
@@ -170,7 +141,7 @@ export default function SettingsPage() {
           <TeamTable rows={memberRows} loading={loading && memberRows.length === 0} />
           <RolesMatrix />
           <SessionPolicy />
-          <DangerZone />
+          <DangerZone firm={firm} />
         </div>
       </main>
     </div>
@@ -179,7 +150,7 @@ export default function SettingsPage() {
 
 /* --------------------------------- Sub-nav --------------------------------- */
 
-function SettingsNav() {
+function SettingsNav({ firm, memberCount }: { firm: FirmSettings | null; memberCount: number }) {
   return (
     <aside
       style={{
@@ -197,7 +168,7 @@ function SettingsNav() {
           Settings
         </h2>
         <span style={{ fontSize: 12, lineHeight: "16px", color: "var(--text-muted)" }}>
-          Acme CA · 8 members · Growth plan
+          {firm ? `${firm.name} · ${memberCount} member${memberCount === 1 ? "" : "s"} · ${firm.plan} plan` : "Loading firm…"}
         </span>
         <div
           className="v2-search-wrap"
@@ -985,7 +956,7 @@ function ToggleSwitch({ on }: { on: boolean }) {
 
 /* --------------------------------- Danger zone --------------------------------- */
 
-function DangerZone() {
+function DangerZone({ firm }: { firm: FirmSettings | null }) {
   return (
     <section
       style={{
@@ -1019,7 +990,7 @@ function DangerZone() {
       />
       <DangerRow
         title="Delete workspace"
-        desc="Permanently delete Acme CA and all client data. This cannot be undone. Requires typed confirmation."
+        desc={`Permanently delete ${firm?.name ?? "this workspace"} and all client data. This cannot be undone. Requires typed confirmation.`}
         btn={<DangerSolidBtn>Delete workspace</DangerSolidBtn>}
         isLast
       />

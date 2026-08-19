@@ -37,53 +37,6 @@ const RefreshSvg = ({ size = 14 }: { size?: number }) => (
   </svg>
 );
 
-/* --- data ---------------------------------------------------------------- */
-
-const SERVICES = [
-  { name: "Web application (frontend)",           uptime: "99.99%" },
-  { name: "API (backend)",                        uptime: "99.98%" },
-  { name: "GSTN Suvidha Provider integration",    uptime: "99.94%" },
-  { name: "AI narrator (Anthropic + Gemini)",     uptime: "99.87%" },
-  { name: "WhatsApp Business API",                uptime: "99.99%" },
-  { name: "Background workers (RQ)",              uptime: "99.99%" },
-];
-
-type IncSev = "MINOR" | "MAJOR";
-type Incident = {
-  sev: IncSev; title: string; date: string; body: string;
-  status: string; duration: string; statusTone: "success" | "warning" | "danger";
-};
-
-const INC_AUG: Incident[] = [
-  { sev: "MINOR", title: "AI narrator elevated latency", date: "4 Aug 2026",
-    body: "Anthropic upstream returned 502s intermittently between 09:14–09:42 IST for ~14% of requests. Failover to Gemini enabled.",
-    status: "Resolved", duration: "28m", statusTone: "success" },
-  { sev: "MINOR", title: "GSTN portal degraded response", date: "1 Aug 2026",
-    body: "GSTN reported degraded response times upstream from 14:30–15:12 IST. 2B pulls automatically retried and succeeded.",
-    status: "Resolved", duration: "42m", statusTone: "success" },
-];
-
-const INC_JUL: Incident[] = [
-  { sev: "MAJOR", title: "AI narrator outage · Anthropic outage", date: "22 Jul 2026",
-    body: "Anthropic API returned 5xx globally between 03:00–04:22 UTC. Automatic failover to Gemini kicked in at 03:04 UTC. Customer-visible impact for ~4 min before failover.",
-    status: "Resolved", duration: "1h 22m", statusTone: "success" },
-];
-
-const INC_JUN: Incident[] = [
-  { sev: "MINOR", title: "Scheduled maintenance · database failover", date: "12 Jun 2026",
-    body: "Planned 15-min failover window for Postgres 15 → 15.4 upgrade. Zero customer-visible impact.",
-    status: "Completed", duration: "12m", statusTone: "success" },
-];
-
-const METRICS = [
-  { l: "90-day uptime",         v: "99.96%", sub: "SLA target 99.9%",   tone: "var(--success)" },
-  { l: "Avg API response",      v: "142ms",  sub: "p50 · GET /health",  tone: "var(--text-muted)" },
-  { l: "Incidents this quarter", v: "4",      sub: "3 minor · 1 major", tone: "var(--text-muted)" },
-  { l: "Mean time to resolve",  v: "47min",  sub: "vs 60min target",    tone: "var(--text-muted)" },
-];
-
-const CHANNELS = ["Email", "SMS", "RSS ↗", "Slack ↗", "Webhook ↗"];
-
 /* --- marketing header --------------------------------------------------- */
 
 function Header() {
@@ -245,31 +198,8 @@ function OverallBanner({
 
 /* --- component card + 90-day strip -------------------------------------- */
 
-function UptimeStrip() {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ display: "flex", gap: 2, height: 32, alignItems: "stretch" }}>
-        {Array.from({ length: 90 }, (_, i) => (
-          <div key={i} style={{
-            width: 3, borderRadius: 1, background: "var(--success)",
-          }} />
-        ))}
-      </div>
-      <div style={{
-        display: "flex", justifyContent: "space-between",
-        fontSize: 11, color: "var(--text-muted)",
-        fontVariantNumeric: "tabular-nums",
-      }}>
-        <span>90 days ago</span>
-        <span>Today</span>
-      </div>
-    </div>
-  );
-}
-
 function ServiceCard({ row }: { row: ServiceRow }) {
   const { fg, bg } = stateColorVar(row.state);
-  const showStrip = row.state === "operational";
   return (
     <div style={{
       padding: 20, background: "var(--surface)",
@@ -294,13 +224,11 @@ function ServiceCard({ row }: { row: ServiceRow }) {
           fontSize: 11, fontWeight: 500,
         }}>{stateLabel(row.state)}</span>
       </div>
-      {showStrip ? <UptimeStrip /> : (
-        <div style={{
-          fontSize: 11, color: "var(--text-muted)", fontStyle: "italic",
-        }}>
-          90-day uptime graph unavailable — historical uptime not persisted.
-        </div>
-      )}
+      <div style={{
+        fontSize: 11, color: "var(--text-muted)", fontStyle: "italic",
+      }}>
+        90-day uptime graph unavailable — historical uptime not persisted.
+      </div>
     </div>
   );
 }
@@ -322,181 +250,6 @@ function Components({ rows }: { rows: ServiceRow[] }) {
       }}>
         {rows.map((r) => (
           <ServiceCard key={r.name} row={r} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* --- incident card ------------------------------------------------------- */
-
-function IncidentCard({ inc }: { inc: Incident }) {
-  const sevMap = {
-    MINOR: { bg: "var(--warning-soft)", fg: "var(--warning)" },
-    MAJOR: { bg: "var(--danger-soft)",  fg: "var(--danger)" },
-  };
-  const sev = sevMap[inc.sev];
-  const statusMap = {
-    success: { bg: "var(--success-soft)", fg: "var(--success)" },
-    warning: { bg: "var(--warning-soft)", fg: "var(--warning)" },
-    danger:  { bg: "var(--danger-soft)",  fg: "var(--danger)" },
-  };
-  const st = statusMap[inc.statusTone];
-  return (
-    <div style={{
-      minHeight: 96, padding: 20,
-      background: "var(--surface)", border: "1px solid var(--border)",
-      borderRadius: 12, boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
-      display: "flex", flexDirection: "column", gap: 8,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{
-          height: 20, padding: "0 8px",
-          background: sev.bg, color: sev.fg,
-          borderRadius: 6,
-          display: "inline-flex", alignItems: "center",
-          fontSize: 10, fontWeight: 600, letterSpacing: "0.06em",
-        }}>{inc.sev}</span>
-        <div style={{
-          flex: 1, fontSize: 15, fontWeight: 500, color: "var(--text-primary)",
-        }}>{inc.title}</div>
-        <div style={{ fontSize: 13, color: "var(--text-muted)", flex: "none" }}>
-          {inc.date}
-        </div>
-      </div>
-      <div style={{
-        fontSize: 13, lineHeight: "20px", color: "var(--text-secondary)",
-      }}>{inc.body}</div>
-      <div style={{
-        alignSelf: "flex-end", display: "flex", alignItems: "center", gap: 8,
-      }}>
-        <span style={{
-          height: 20, padding: "0 8px",
-          background: st.bg, color: st.fg,
-          borderRadius: 6,
-          display: "inline-flex", alignItems: "center",
-          fontSize: 11, fontWeight: 500,
-        }}>{inc.status}</span>
-        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{inc.duration}</span>
-      </div>
-    </div>
-  );
-}
-
-function IncidentHistory() {
-  const monthLabel = (t: string): React.CSSProperties => ({});
-  const months = [
-    { label: "AUGUST 2026", items: INC_AUG },
-    { label: "JULY 2026",   items: INC_JUL },
-    { label: "JUNE 2026",   items: INC_JUN },
-  ];
-  return (
-    <div style={{ marginTop: 64 }}>
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-      }}>
-        <h2 style={{
-          margin: 0, fontSize: 24, lineHeight: "32px", fontWeight: 600,
-          letterSpacing: "-0.01em", color: "var(--text-primary)",
-        }}>Incident history</h2>
-        <div style={{
-          display: "inline-flex", height: 32,
-          border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden",
-          background: "var(--surface)",
-        }}>
-          <button style={{
-            padding: "0 14px", fontSize: 12, fontWeight: 500,
-            border: "none", cursor: "pointer",
-            background: "var(--accent-soft)", color: "var(--accent)",
-          }}>Last 90 days</button>
-          <button style={{
-            padding: "0 14px", fontSize: 12, fontWeight: 500,
-            border: "none", cursor: "pointer",
-            borderLeft: "1px solid var(--border)",
-            background: "transparent", color: "var(--text-secondary)",
-          }}>Last 12 months</button>
-        </div>
-      </div>
-
-      <div style={{
-        marginTop: 24, display: "flex", flexDirection: "column", gap: 24,
-      }}>
-        {months.map(m => (
-          <div key={m.label} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{
-              fontSize: 11, fontWeight: 500, letterSpacing: "0.06em",
-              textTransform: "uppercase", color: "var(--text-muted)",
-            }}>{m.label}</div>
-            {m.items.map(inc => <IncidentCard key={inc.title} inc={inc} />)}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* --- metrics ------------------------------------------------------------ */
-
-function Metrics() {
-  return (
-    <div style={{ marginTop: 64 }}>
-      <h2 style={{
-        margin: 0, fontSize: 24, lineHeight: "32px", fontWeight: 600,
-        letterSpacing: "-0.01em", color: "var(--text-primary)",
-      }}>Metrics</h2>
-      <div style={{
-        marginTop: 24, display: "grid",
-        gridTemplateColumns: "repeat(4, 1fr)", gap: 12,
-      }}>
-        {METRICS.map(m => (
-          <div key={m.l} style={{
-            minHeight: 96, padding: 20,
-            background: "var(--surface)", border: "1px solid var(--border)",
-            borderRadius: 12, boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
-            display: "flex", flexDirection: "column", gap: 8,
-          }}>
-            <div style={{
-              fontSize: 11, fontWeight: 500, letterSpacing: "0.06em",
-              textTransform: "uppercase", color: "var(--text-muted)",
-            }}>{m.l}</div>
-            <div style={{
-              fontSize: 24, fontWeight: 600, color: "var(--text-primary)",
-            }}>{m.v}</div>
-            <div style={{ fontSize: 12, color: m.tone }}>{m.sub}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* --- subscribe row ------------------------------------------------------ */
-
-function Subscribe() {
-  return (
-    <div style={{
-      marginTop: 48, minHeight: 72, padding: "16px 24px",
-      background: "var(--surface)", border: "1px solid var(--border)",
-      borderRadius: 12, boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
-      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24,
-      flexWrap: "wrap",
-    }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <div style={{ fontSize: 15, fontWeight: 500, color: "var(--text-primary)" }}>
-          Subscribe to status updates
-        </div>
-        <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-          Email, SMS, RSS, Slack, or webhook — pick your channel.
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {CHANNELS.map(c => (
-          <button key={c} style={{
-            height: 32, padding: "0 14px",
-            border: "1px solid var(--border)", borderRadius: 8,
-            background: "var(--surface)", color: "var(--text-primary)",
-            fontSize: 12, fontWeight: 500, cursor: "pointer",
-          }}>{c}</button>
         ))}
       </div>
     </div>
@@ -610,25 +363,6 @@ export default function StatusPage() {
           </div>
         )}
         <Components rows={services} />
-        {/* Scope notice — history + metrics + subscribe are not backed by real
-         *  endpoints. Kept for design continuity; flag before shipping public. */}
-        <div style={{
-          marginTop: 32, padding: "10px 14px",
-          background: "var(--row-hover)", border: "1px solid var(--border)",
-          borderRadius: 8, fontSize: 12, color: "var(--text-secondary)",
-          display: "flex", alignItems: "flex-start", gap: 8,
-        }}>
-          <span style={{ color: "var(--text-muted)", marginTop: 1 }}><AlertTriangleIcon size={14} /></span>
-          <span>
-            The <strong>components</strong> section above is live. The <strong>incident
-            history</strong>, <strong>metrics</strong>, and <strong>subscribe channels</strong> below
-            are design placeholders — no incident log, uptime history, or subscription service is
-            wired yet.
-          </span>
-        </div>
-        <IncidentHistory />
-        <Metrics />
-        <Subscribe />
       </div>
       <Footer />
     </div>
