@@ -29,6 +29,7 @@ from sqlalchemy import select, text
 
 from app.api.deps import get_current_user, get_firm_scoped_session
 from app.auth import audit
+from app.legal.gate import require_legal_accepted
 from app.config import settings
 from app.db import firm_scoped_session
 from app.ingestion.errors import rejects_to_csv
@@ -101,6 +102,7 @@ def upload_invoices(
     direction: Literal["purchase", "sale"] = Form(...),
     file: UploadFile = File(...),
     user: AppUser = Depends(get_current_user),
+    _legal: None = Depends(require_legal_accepted),
 ) -> ImportJobResponse:
     ext = _extension(file.filename or "")
     if ext not in ALLOWED_INVOICE_EXTS:
@@ -175,6 +177,7 @@ def upload_gstr2b(
     period: str = Form(..., pattern=r"^[0-9]{6}$"),
     file: UploadFile = File(...),
     user: AppUser = Depends(get_current_user),
+    _legal: None = Depends(require_legal_accepted),
 ) -> ImportJobResponse:
     ext = _extension(file.filename or "")
     if ext != "json":

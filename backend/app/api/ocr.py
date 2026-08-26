@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.api.deps import get_current_user, get_firm_scoped_session
+from app.legal.gate import require_legal_accepted
 from app.config import settings
 from app.models.tables import AppUser
 from app.ocr import service
@@ -206,6 +207,7 @@ def extract_invoice(
     direction: Literal["purchase", "sale"] = Form(...),
     file: UploadFile = File(...),
     user: AppUser = Depends(get_current_user),
+    _legal: None = Depends(require_legal_accepted),
 ) -> ExtractionResp:
     """Extract structured fields from an uploaded invoice and persist
     a draft ``ocr_extraction`` row.
@@ -398,6 +400,7 @@ def accept_extraction(
     extraction_id: uuid.UUID,
     payload: AcceptReq,
     user: AppUser = Depends(get_current_user),
+    _legal: None = Depends(require_legal_accepted),
 ) -> AcceptResp:
     """Materialise an Invoice row from the extraction.
 

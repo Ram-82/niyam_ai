@@ -21,6 +21,7 @@ from sqlalchemy import text
 
 from app.api.deps import get_current_user, get_firm_scoped_session, require_admin
 from app.auth import audit
+from app.legal.gate import require_legal_accepted
 from app.models.tables import AppUser
 
 
@@ -119,6 +120,7 @@ def create_client(
     payload: ClientCreateRequest,
     admin: AppUser = Depends(require_admin),
     session=Depends(get_firm_scoped_session),
+    _legal: None = Depends(require_legal_accepted),
 ) -> ClientResponse:
     if payload.whatsapp_number and not _E164_RE.match(payload.whatsapp_number):
         raise HTTPException(status_code=400, detail="invalid_e164_number")
@@ -239,6 +241,7 @@ def add_gstin(
     payload: GstinCreateRequest,
     admin: AppUser = Depends(require_admin),
     session=Depends(get_firm_scoped_session),
+    _legal: None = Depends(require_legal_accepted),
 ) -> GstinResponse:
     if not GSTIN_STRUCTURAL_RE.match(payload.gstin):
         raise HTTPException(
@@ -392,6 +395,7 @@ async def import_clients_csv(
     dry_run: bool = Query(default=True, description="If true, validate but do not insert."),
     admin: AppUser = Depends(require_admin),
     session=Depends(get_firm_scoped_session),
+    _legal: None = Depends(require_legal_accepted),
 ) -> ImportResponse:
     # Parse mapping JSON.
     try:

@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.api.deps import get_current_user, get_firm_scoped_session
+from app.legal.gate import require_legal_accepted
 from app.config import settings
 from app.models.tables import AppUser
 from app.whatsapp import service, webhook
@@ -129,6 +130,7 @@ def _translate_whatsapp_error(e: WhatsAppError) -> HTTPException:
 def create_delivery_request(
     payload: CreateReportRequestReq,
     user: AppUser = Depends(get_current_user),
+    _legal: None = Depends(require_legal_accepted),
 ) -> DeliveryRequestCreatedResp:
     if not is_valid_e164(payload.whatsapp_number):
         raise HTTPException(status_code=400, detail="invalid_e164_number")
@@ -152,6 +154,7 @@ def create_delivery_request(
 def create_chase_request(
     payload: CreateChaseRequestReq,
     user: AppUser = Depends(get_current_user),
+    _legal: None = Depends(require_legal_accepted),
 ) -> DeliveryRequestCreatedResp:
     """Supplier-chase delivery_request. Points at a match_result rather
     than a narration_run. The near-miss review gate is enforced at

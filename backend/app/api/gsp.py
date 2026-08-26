@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.api.deps import get_current_user, get_firm_scoped_session
+from app.legal.gate import require_legal_accepted
 from app.auth import audit
 from app.config import settings
 from app.db import owner_engine
@@ -237,7 +238,9 @@ def disconnect(
 
 @router.post("/pull", response_model=PullResp)
 def pull_now(
-    payload: PullReq, user: AppUser = Depends(get_current_user)
+    payload: PullReq,
+    user: AppUser = Depends(get_current_user),
+    _legal: None = Depends(require_legal_accepted),
 ) -> PullResp:
     """Pull 2B for a (gstin_profile, period). Reuses the JSON-upload
     ingestion path — the resulting ``gstn_pull`` row has
