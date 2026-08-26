@@ -776,12 +776,15 @@ def _insert_call_log(
     cache_read=800,
     cache_creation=0,
     latency_ms=200,
+    cost_paise=None,
     at=None,
 ):
     """Direct-insert into narrator_call_log for controlled cost tests.
 
     Bypasses the service layer so tests can seed rows across months +
-    models without needing 100 different narration runs.
+    models without needing 100 different narration runs. ``cost_paise``
+    defaults to None (unpriced) — set it explicitly when the test wants
+    to exercise the priced path or budget aggregation.
     """
     with owner_engine.begin() as conn:
         conn.execute(
@@ -792,12 +795,12 @@ def _insert_call_log(
                     succeeded, error_kind,
                     input_tokens, output_tokens,
                     cache_read_input_tokens, cache_creation_input_tokens,
-                    latency_ms, at
+                    latency_ms, cost_paise, at
                 ) VALUES (
                     :fid, :prov, :model, 1, 'en',
                     :ok, :ek,
                     :it, :ot, :crt, :cct,
-                    :ms, COALESCE(:at, now())
+                    :ms, :cp, COALESCE(:at, now())
                 )
                 """
             ),
@@ -812,6 +815,7 @@ def _insert_call_log(
                 "crt": cache_read,
                 "cct": cache_creation,
                 "ms": latency_ms,
+                "cp": cost_paise,
                 "at": at,
             },
         )
@@ -833,7 +837,8 @@ def test_monthly_stats_empty_month(bootstrap_firm) -> None:
     assert stats["failed"] == 0
     assert stats["input_tokens"] == 0
     assert stats["cache_hit_rate"] is None  # no data → no meaningful rate
-    assert stats["estimated_usd"] == 0.0  # no unpriced models seen
+    assert stats["cost_paise"] == 0
+    assert stats["any_unpriced"] is False
     assert stats["per_model"] == []
     assert stats["latency_ms_p50"] is None
 
@@ -890,33 +895,75 @@ def test_monthly_stats_cache_hit_rate_math(bootstrap_firm) -> None:
 
 
 def test_monthly_stats_priced_and_unpriced_models(bootstrap_firm) -> None:
-    """A known model produces USD; an unknown model returns None and
-    forces the aggregate estimated_usd to also be None (so the
-    dashboard flags unpriced data instead of silently under-counting)."""
+    """A known model produces cost_paise; an unknown model produces
+    unpriced_calls > 0 and forces the aggregate ``any_unpriced`` flag
+    to True (so the dashboard flags partial data instead of silently
+    under-counting)."""
+    from app.narrator import pricing
+
     b = bootstrap_firm()
     fid = b["firm_id"]
-    _insert_call_log(fid, model="claude-opus-4-7", input_tokens=1000, output_tokens=100)
-    _insert_call_log(fid, model="claude-experimental-9-9", input_tokens=500, output_tokens=50)
+    # Priced model — set cost_paise as the service would.
+    opus_cost = pricing.estimate_cost_paise(
+        "claude-opus-4-7",
+        {
+            "input_tokens": 1000,
+            "output_tokens": 100,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+        },
+    )
+    _insert_call_log(
+        fid,
+        model="claude-opus-4-7",
+        input_tokens=1000,
+        output_tokens=100,
+        cost_paise=opus_cost,
+    )
+    # Unpriced model — cost_paise stays NULL.
+    _insert_call_log(
+        fid,
+        model="claude-experimental-9-9",
+        input_tokens=500,
+        output_tokens=50,
+        cost_paise=None,
+    )
 
     stats = service.monthly_narrator_stats(firm_id=fid, month=_current_month())
     assert len(stats["per_model"]) == 2
     opus = next(r for r in stats["per_model"] if r["model"] == "claude-opus-4-7")
     exp = next(r for r in stats["per_model"] if r["model"] == "claude-experimental-9-9")
-    assert opus["estimated_usd"] is not None
-    assert opus["estimated_usd"] > 0
-    assert exp["estimated_usd"] is None
-    # Aggregate must be None because at least one model was unpriced.
-    assert stats["estimated_usd"] is None
+    assert opus["cost_paise"] > 0
+    assert opus["unpriced_calls"] == 0
+    assert exp["cost_paise"] == 0
+    assert exp["unpriced_calls"] == 1
+    # Aggregate flag: at least one call was unpriced, so warn the dashboard.
+    assert stats["any_unpriced"] is True
+    # Total cost_paise is priced-only (unpriced rows are excluded).
+    assert stats["cost_paise"] == opus["cost_paise"]
 
 
-def test_monthly_stats_usd_math_opus(bootstrap_firm) -> None:
-    """Verify the price math against known Anthropic Opus 4.7 list prices.
+def test_monthly_stats_paise_math_opus(bootstrap_firm) -> None:
+    """Verify the priced cost sum against Anthropic Opus 4.7 list prices.
 
     Prices ($/M): input=15, output=75, cache_read=1.50.
-    Row: input=1M, output=1M, cache_read=1M → fresh_input = 1M - 1M - 0 = 0
-    Expected: 0 * 15 + 1 * 75 + 1 * 1.50 = $76.50
+    Row: input=1M, output=1M, cache_read=1M → fresh_input = 0
+    Expected USD: 0*15 + 1*75 + 1*1.50 = $76.50
+    Expected paise: 76.5 × USD_TO_PAISE_FX (from pricing config).
     """
+    from app.narrator import pricing
+
     b = bootstrap_firm()
+    expected_paise = pricing.estimate_cost_paise(
+        "claude-opus-4-7",
+        {
+            "input_tokens": 1_000_000,
+            "output_tokens": 1_000_000,
+            "cache_read_input_tokens": 1_000_000,
+            "cache_creation_input_tokens": 0,
+        },
+    )
+    assert expected_paise is not None
     _insert_call_log(
         b["firm_id"],
         model="claude-opus-4-7",
@@ -924,11 +971,14 @@ def test_monthly_stats_usd_math_opus(bootstrap_firm) -> None:
         output_tokens=1_000_000,
         cache_read=1_000_000,
         cache_creation=0,
+        cost_paise=expected_paise,
     )
     stats = service.monthly_narrator_stats(
         firm_id=b["firm_id"], month=_current_month()
     )
-    assert stats["estimated_usd"] == pytest.approx(76.5, rel=1e-4)
+    assert stats["cost_paise"] == expected_paise
+    # And no unpriced-model flag set.
+    assert stats["any_unpriced"] is False
 
 
 def test_monthly_stats_firm_isolation(bootstrap_firm) -> None:
@@ -1010,3 +1060,286 @@ def test_narration_run_is_append_only(bootstrap_firm) -> None:
                 text("DELETE FROM narration_run WHERE id = :id"),
                 {"id": str(run_id)},
             )
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.4 — cost_paise + per-firm monthly budget + runtime kill-switch
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _reset_system_settings():
+    """system_settings is a single-row global. The seeded row can be
+    absent between tests because clean_db's ``TRUNCATE ca_firm
+    CASCADE`` used to also truncate this table (see migration 0024 —
+    the FK was dropped, but leaving the fixture robust to either state
+    is cheap). We upsert the singleton on entry AND reset the
+    kill-switch flag on exit."""
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO system_settings (id) VALUES (1) "
+                "ON CONFLICT (id) DO UPDATE "
+                "SET narrator_globally_disabled = false"
+            )
+        )
+    yield
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO system_settings (id) VALUES (1) "
+                "ON CONFLICT (id) DO UPDATE "
+                "SET narrator_globally_disabled = false"
+            )
+        )
+
+
+def _set_firm_budget(firm_id, budget_paise) -> None:
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE ca_firm SET monthly_narrator_budget_paise = :b "
+                "WHERE id = :fid"
+            ),
+            {"b": budget_paise, "fid": str(firm_id)},
+        )
+
+
+def test_runtime_global_kill_switch_disables_narrator(
+    _reset_system_settings, monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    """The runtime kill switch (system_settings.narrator_globally_disabled)
+    is orthogonal to settings.narrator_enabled: it takes effect without
+    a deploy. When flipped on, every firm — even those with
+    narrator_enabled=true — must get NarratorDisabled. The adapter must
+    never be invoked."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE system_settings "
+                "SET narrator_globally_disabled = true WHERE id = 1"
+            )
+        )
+
+    class _MustNotBeCalled:
+        provider = "must-not"
+        model = "must-not"
+
+        def narrate(self, *a, **kw):
+            raise AssertionError("adapter should not have been invoked")
+
+    monkeypatch.setattr(service, "get_adapter", lambda: _MustNotBeCalled())
+
+    with pytest.raises(NarratorDisabled):
+        service.narrate_for_period(
+            firm_id=b["firm_id"],
+            gstin_profile_id=gpid,
+            return_type="GSTR1",
+            period="202607",
+            language="en",
+        )
+
+    # No call_log row was written — the kill switch fired before the
+    # adapter or logging path was touched.
+    assert _read_call_logs(b["firm_id"]) == []
+
+
+def test_budget_exhausted_raises_and_skips_adapter(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    """When the current-month sum(cost_paise) meets or exceeds
+    ca_firm.monthly_narrator_budget_paise, the call must raise
+    NarratorBudgetExhausted before invoking the adapter. Silent
+    fallback to a cheaper model is disallowed (P3_BUILD_PROMPT §3.1.4)."""
+    from app.narrator.types import NarratorBudgetExhausted
+
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+
+    # Set budget = 100 paise, then log a prior call costing 100 paise
+    # this month. The next call should refuse.
+    _set_firm_budget(b["firm_id"], 100)
+    _insert_call_log(
+        b["firm_id"],
+        model="claude-opus-4-7",
+        input_tokens=10,
+        output_tokens=5,
+        cost_paise=100,
+    )
+
+    class _MustNotBeCalled:
+        provider = "must-not"
+        model = "must-not"
+
+        def narrate(self, *a, **kw):
+            raise AssertionError("adapter should not have been invoked")
+
+    monkeypatch.setattr(service, "get_adapter", lambda: _MustNotBeCalled())
+
+    with pytest.raises(NarratorBudgetExhausted) as excinfo:
+        service.narrate_for_period(
+            firm_id=b["firm_id"],
+            gstin_profile_id=gpid,
+            return_type="GSTR1",
+            period="202607",
+            language="en",
+        )
+    assert excinfo.value.used_paise == 100
+    assert excinfo.value.budget_paise == 100
+
+    # Only the seeded prior row is on the log — no attempted-call row
+    # was written, because the gate short-circuited before the adapter.
+    rows = _read_call_logs(b["firm_id"])
+    assert len(rows) == 1
+    assert rows[0]["input_tokens"] == 10
+
+
+def test_budget_null_means_no_limit(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    """A firm with monthly_narrator_budget_paise = NULL keeps the
+    pre-Phase-1.4 behaviour: no ceiling, no cost check, calls proceed."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+    _set_firm_budget(b["firm_id"], None)
+    monkeypatch.setattr(service, "get_adapter", lambda: _UsageStubAdapter())
+
+    service.narrate_for_period(
+        firm_id=b["firm_id"],
+        gstin_profile_id=gpid,
+        return_type="GSTR1",
+        period="202607",
+        language="en",
+    )
+    rows = _read_call_logs(b["firm_id"])
+    assert len(rows) == 1
+    assert rows[0]["succeeded"] is True
+
+
+def test_budget_ignores_unpriced_rows(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    """Rows with cost_paise IS NULL are excluded from the budget SUM.
+    An unpriced call cannot eat into a firm's budget."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+
+    # Budget = 100 paise; seed a prior unpriced call. That row must NOT
+    # count toward the ceiling.
+    _set_firm_budget(b["firm_id"], 100)
+    _insert_call_log(
+        b["firm_id"],
+        model="claude-experimental-9-9",
+        input_tokens=10_000,
+        output_tokens=5_000,
+        cost_paise=None,
+    )
+    monkeypatch.setattr(service, "get_adapter", lambda: _UsageStubAdapter())
+
+    # Call should succeed — the unpriced prior row doesn't count.
+    service.narrate_for_period(
+        firm_id=b["firm_id"],
+        gstin_profile_id=gpid,
+        return_type="GSTR1",
+        period="202607",
+        language="en",
+    )
+    rows = _read_call_logs(b["firm_id"])
+    # Prior seeded row + one new success row = 2 total.
+    assert len(rows) == 2
+
+
+def test_cost_paise_written_at_call_time_for_priced_model(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    """The service must compute cost_paise from tokens × pricing config
+    at call time and stamp it on the narrator_call_log row. Downstream
+    aggregation must not recompute — a later pricing-table update must
+    not rewrite historical cost figures."""
+    from app.narrator import pricing
+
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+
+    # Use a real pricing-config model id so the row gets cost_paise.
+    stub = _UsageStubAdapter(
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        cache_read=1_000_000,
+        cache_creation=0,
+    )
+    stub.model = "claude-opus-4-7"
+    monkeypatch.setattr(service, "get_adapter", lambda: stub)
+
+    service.narrate_for_period(
+        firm_id=b["firm_id"],
+        gstin_profile_id=gpid,
+        return_type="GSTR1",
+        period="202607",
+        language="en",
+    )
+
+    with owner_engine.begin() as conn:
+        row = conn.execute(
+            text(
+                "SELECT cost_paise, pricing_effective_from FROM narrator_call_log "
+                "WHERE firm_id = :fid ORDER BY at DESC LIMIT 1"
+            ),
+            {"fid": str(b["firm_id"])},
+        ).first()
+
+    expected = pricing.estimate_cost_paise(
+        "claude-opus-4-7",
+        {
+            "input_tokens": 1_000_000,
+            "output_tokens": 1_000_000,
+            "cache_read_input_tokens": 1_000_000,
+            "cache_creation_input_tokens": 0,
+        },
+    )
+    assert row is not None
+    assert row[0] == expected
+    assert row[1] is not None  # pricing_effective_from stamped
+
+
+def test_cost_paise_null_for_unpriced_model(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    """A call against a model not in the pricing config must persist
+    cost_paise=NULL. The aggregation surfaces this as ``any_unpriced=true``
+    rather than a spurious ₹0 total."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+
+    stub = _UsageStubAdapter(input_tokens=1200, output_tokens=350)
+    stub.model = "claude-experimental-9-9"  # Not in pricing.MODEL_PRICE_USD_PER_M
+    monkeypatch.setattr(service, "get_adapter", lambda: stub)
+
+    service.narrate_for_period(
+        firm_id=b["firm_id"],
+        gstin_profile_id=gpid,
+        return_type="GSTR1",
+        period="202607",
+        language="en",
+    )
+
+    with owner_engine.begin() as conn:
+        row = conn.execute(
+            text(
+                "SELECT cost_paise, pricing_effective_from FROM narrator_call_log "
+                "WHERE firm_id = :fid ORDER BY at DESC LIMIT 1"
+            ),
+            {"fid": str(b["firm_id"])},
+        ).first()
+    assert row is not None
+    assert row[0] is None
+    assert row[1] is None

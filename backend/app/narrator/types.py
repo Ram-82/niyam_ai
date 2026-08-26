@@ -131,6 +131,26 @@ class NarratorDisabled(NarratorError):
     """Feature flag off. Callers should treat like the old stub."""
 
 
+class NarratorBudgetExhausted(NarratorDisabled):
+    """Per-firm monthly cost ceiling reached.
+
+    Subclass of :class:`NarratorDisabled` so existing 503 handlers
+    keep working. Callers that want to render a more specific message
+    ("budget exhausted — contact your admin") can catch this class.
+
+    Never silently degrade to a cheaper model — spec P3_BUILD_PROMPT
+    §3.1.4 forbids it. Raise from the pre-call check.
+    """
+
+    def __init__(self, *, used_paise: int, budget_paise: int) -> None:
+        super().__init__(
+            f"narrator monthly budget exhausted: "
+            f"used {used_paise} paise of {budget_paise}"
+        )
+        self.used_paise = used_paise
+        self.budget_paise = budget_paise
+
+
 class NumberHallucination(NarratorError):
     """The output contained a number not present in the frozen facts.
 

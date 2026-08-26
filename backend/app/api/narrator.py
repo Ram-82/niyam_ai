@@ -24,6 +24,7 @@ from app.narrator import service
 from app.narrator.facts_builder import FactsUnavailable
 from app.narrator.types import (
     Language,
+    NarratorBudgetExhausted,
     NarratorDisabled,
     NarratorError,
     NumberHallucination,
@@ -75,6 +76,19 @@ def preview(
             period=payload.period,
             language=payload.language,  # type: ignore[arg-type]
             user_id=user.id,
+        )
+    except NarratorBudgetExhausted as e:
+        # NarratorBudgetExhausted subclasses NarratorDisabled so the
+        # generic 503 path still catches it; we surface a distinct
+        # detail string so the frontend can render an honest
+        # "monthly budget reached" message per the frozen-label rule.
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "narrator_budget_exhausted",
+                "used_paise": e.used_paise,
+                "budget_paise": e.budget_paise,
+            },
         )
     except NarratorDisabled:
         raise HTTPException(status_code=503, detail="narrator_disabled")
@@ -182,7 +196,11 @@ class NarratorCostsPerModel(BaseModel):
     output_tokens: int
     cache_read_input_tokens: int
     cache_creation_input_tokens: int
-    estimated_usd: Optional[float]
+    # Integer paise (Phase 1.4). Sum of narrator_call_log.cost_paise
+    # for this model in the window; unpriced-model rows are excluded
+    # from this sum and counted in ``unpriced_calls`` instead.
+    cost_paise: int
+    unpriced_calls: int
 
 
 class NarratorCostsResp(BaseModel):
@@ -198,7 +216,16 @@ class NarratorCostsResp(BaseModel):
     cache_creation_input_tokens: int
     cache_hit_rate: Optional[float]  # 0.0-100.0 percent; None if no LLM calls
     per_model: list[NarratorCostsPerModel]
-    estimated_usd: Optional[float]  # None if any model was unpriced
+    # Integer paise (spec: money is integer paise everywhere in
+    # storage and transport). Sum across all models in the window.
+    cost_paise: int
+    # True when at least one priced-succeeded call had an unknown
+    # model (cost_paise IS NULL). Callers surface this as a "partial
+    # total" warning so a real bill is never rendered as the total.
+    any_unpriced: bool
+    # ISO-8601 stamp of the pricing table used at call time. Frontend
+    # can render "priced at <date>" so a stale table is visible.
+    pricing_effective_from: str
     latency_ms_p50: Optional[float]
     latency_ms_p95: Optional[float]
 

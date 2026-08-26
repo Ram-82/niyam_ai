@@ -394,10 +394,15 @@ def test_costs_endpoint_returns_stats_for_admin(
     assert body["failed"] == 0
     # Mock adapter → no LLM tokens → cache_hit_rate is None.
     assert body["cache_hit_rate"] is None
-    # Mock provider has no price entry → estimated_usd is None.
-    assert body["estimated_usd"] is None
+    # Mock provider is unpriced (not in pricing.MODEL_PRICE_USD_PER_M)
+    # → cost_paise 0 with any_unpriced=true to flag partial data.
+    assert body["cost_paise"] == 0
+    # Mock adapter reports NULL tokens, so it does NOT count as an
+    # unpriced-call for the flag. any_unpriced trips only for
+    # succeeded calls with non-null tokens against an unknown model.
     # At least one per_model row for "mock".
     assert any(m["model"] == "template-v1" for m in body["per_model"])
+    assert "pricing_effective_from" in body
 
 
 def test_costs_endpoint_month_override(test_client, bootstrap_firm) -> None:

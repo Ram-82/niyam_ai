@@ -27,12 +27,13 @@ from sqlalchemy import text
 from app.auth import audit
 from app.config import settings
 from app.db import firm_scoped_session
-from app.narrator import validator
+from app.narrator import pricing, validator
 from app.narrator.facts_builder import FactsUnavailable, build_facts
 from app.narrator.mock_adapter import MockNarrator
 from app.narrator.types import (
     Language,
     Narrator,
+    NarratorBudgetExhausted,
     NarratorDisabled,
     NarratorError,
     NarrationFacts,
@@ -234,6 +235,27 @@ def _log_call(
     per-call granularity so cost dashboards can distinguish
     "one narration cost me 2 API calls" from "one narration = one call".
     """
+    # cost_paise: None whenever the model is unpriced OR no tokens were
+    # reported (mock adapter / failed attempts with no usage). NULL in
+    # the log so the aggregation surfaces "unpriced" honestly instead
+    # of a spurious ₹0. When we DO have a cost, we also stamp the
+    # pricing_effective_from so a later audit can tell WHICH pricing
+    # table produced the number.
+    cost_paise: Optional[int] = None
+    pricing_effective_from = None
+    if usage.input_tokens is not None or usage.output_tokens is not None:
+        cost_paise = pricing.estimate_cost_paise(
+            model,
+            {
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cache_read_input_tokens": usage.cache_read_input_tokens,
+                "cache_creation_input_tokens": usage.cache_creation_input_tokens,
+            },
+        )
+        if cost_paise is not None:
+            pricing_effective_from = pricing.PRICING_EFFECTIVE_FROM
+
     with firm_scoped_session(firm_id) as db:
         db.execute(
             text(
@@ -243,12 +265,12 @@ def _log_call(
                     attempt, language, succeeded, error_kind,
                     input_tokens, output_tokens,
                     cache_read_input_tokens, cache_creation_input_tokens,
-                    latency_ms
+                    latency_ms, cost_paise, pricing_effective_from
                 ) VALUES (
                     :fid, :gpid, :prov, :model,
                     :att, :lang, :ok, :ek,
                     :it, :ot, :crt, :cct,
-                    :ms
+                    :ms, :cp, :pef
                 )
                 """
             ),
@@ -266,23 +288,108 @@ def _log_call(
                 "crt": usage.cache_read_input_tokens,
                 "cct": usage.cache_creation_input_tokens,
                 "ms": int((time.time() - started_at) * 1000),
+                "cp": cost_paise,
+                "pef": pricing_effective_from,
             },
         )
 
+    # Prometheus counters (Phase 1.6). The counter surface intentionally
+    # mirrors the log row: success/hallucination/adapter_error map to
+    # narrator_calls_total; cost_paise (when priced) accumulates on
+    # narrator_cost_paise_total. Kept last so an increment cannot mask
+    # a failed INSERT above.
+    from app.observability import metrics
 
-def _firm_narrator_enabled(firm_id: str | uuid.UUID) -> bool:
-    """Read the per-firm ``ca_firm.narrator_enabled`` flag.
+    if cost_paise:
+        metrics.narrator_cost_paise_total.labels(model=model).inc(cost_paise)
+    outcome = "success" if succeeded else (error_kind or "error")
+    metrics.narrator_calls_total.labels(model=model, outcome=outcome).inc()
 
-    Returns False if the row is missing (defensive — should never
-    happen inside a firm-scoped call, but a False here just means
-    we raise NarratorDisabled rather than crashing).
+
+def _check_pre_call_gates(firm_id: str | uuid.UUID) -> None:
+    """Enforce the three pre-call gates in defence-in-depth order.
+
+    Order matters — cheapest check first, so a killed operator flag
+    never even reads ``ca_firm``:
+
+    1. ``system_settings.narrator_globally_disabled`` — the runtime
+       operator kill-switch. Effective without a deploy. Composes
+       with the env-var ``settings.narrator_enabled`` (env is the
+       deploy-time base policy; this row hard-offs an incident).
+    2. ``ca_firm.narrator_enabled`` — the firm-admin toggle.
+    3. ``ca_firm.monthly_narrator_budget_paise`` vs
+       ``SUM(cost_paise)`` for the current calendar month. NULL budget
+       = no limit. Silent fallback to a cheaper model is disallowed
+       (P3_BUILD_PROMPT §3.1.4) so we raise instead of degrading.
+
+    Raises:
+      NarratorDisabled — global runtime flag or per-firm flag off.
+      NarratorBudgetExhausted — per-firm monthly ceiling reached.
+
+    Executes as three statements inside one firm-scoped transaction so
+    the reads see a consistent snapshot; system_settings has no RLS,
+    so being firm-scoped does not exclude the row.
     """
+    from app.observability import metrics
+
     with firm_scoped_session(firm_id) as db:
-        row = db.execute(
-            text("SELECT narrator_enabled FROM ca_firm WHERE id = :id"),
+        global_row = db.execute(
+            text(
+                "SELECT narrator_globally_disabled "
+                "FROM system_settings WHERE id = 1"
+            )
+        ).first()
+        if global_row and bool(global_row[0]):
+            metrics.narrator_calls_total.labels(
+                model="__gate__", outcome="disabled_global"
+            ).inc()
+            raise NarratorDisabled(
+                "narrator globally disabled by operator "
+                "(system_settings.narrator_globally_disabled)"
+            )
+        firm_row = db.execute(
+            text(
+                "SELECT narrator_enabled, monthly_narrator_budget_paise "
+                "FROM ca_firm WHERE id = :id"
+            ),
             {"id": str(firm_id)},
         ).first()
-    return bool(row and row[0])
+        if not firm_row or not bool(firm_row[0]):
+            metrics.narrator_calls_total.labels(
+                model="__gate__", outcome="disabled_firm"
+            ).inc()
+            raise NarratorDisabled(
+                "narrator disabled for this firm "
+                "(firm admin can flip via PATCH /firm/settings)"
+            )
+        budget = firm_row[1]
+        if budget is None:
+            return
+        # Sum cost_paise for the current calendar month (server clock).
+        # Uses the partial index narrator_call_log_firm_month_cost via
+        # the WHERE cost_paise IS NOT NULL clause; unpriced rows are
+        # correctly excluded so they never eat into the budget.
+        used_row = db.execute(
+            text(
+                """
+                SELECT COALESCE(SUM(cost_paise), 0) AS used
+                FROM narrator_call_log
+                WHERE firm_id = :fid
+                  AND cost_paise IS NOT NULL
+                  AND EXTRACT(YEAR FROM at) = EXTRACT(YEAR FROM now())
+                  AND EXTRACT(MONTH FROM at) = EXTRACT(MONTH FROM now())
+                """
+            ),
+            {"fid": str(firm_id)},
+        ).first()
+        used = int(used_row[0]) if used_row else 0
+        if used >= int(budget):
+            metrics.narrator_calls_total.labels(
+                model="__gate__", outcome="budget_exhausted"
+            ).inc()
+            raise NarratorBudgetExhausted(
+                used_paise=used, budget_paise=int(budget)
+            )
 
 
 def narrate_for_period(
@@ -299,29 +406,32 @@ def narrate_for_period(
     Every adapter invocation (including retries) is recorded to
     ``narrator_call_log`` for cost + cache-hit observability.
 
-    Two independent gates block a call:
-      1. The global ``settings.narrator_enabled`` (operator kill switch).
-         Enforced inside :func:`get_adapter`.
-      2. The per-firm ``ca_firm.narrator_enabled`` (firm-admin toggle).
-         Enforced here, checked BEFORE invoking ``get_adapter`` so a
-         firm-off request never touches the LLM plumbing.
+    Four independent gates block a call, checked in cheapest-first
+    order so a killed operator flag never reaches the LLM plumbing:
 
-    Both must be true for a call to fire. Either being false raises
-    ``NarratorDisabled``. The distinction between the two is invisible
-    to the CA — the API returns 503 either way.
+      1. ``settings.narrator_enabled`` (env-var; deploy-time base
+         policy). Enforced inside :func:`get_adapter`.
+      2. ``system_settings.narrator_globally_disabled`` (runtime;
+         no-deploy operator kill-switch).
+      3. ``ca_firm.narrator_enabled`` (firm-admin toggle).
+      4. ``ca_firm.monthly_narrator_budget_paise`` (per-firm monthly
+         cost ceiling in paise; NULL = no limit).
+
+    Gates 2–4 are enforced in :func:`_check_pre_call_gates` before
+    :func:`get_adapter` so a firm-off / budget-exhausted request never
+    touches the LLM plumbing. Gate 1 is checked last (inside
+    ``get_adapter``) because the env may be intentionally off in dev.
 
     Raises:
-      NarratorDisabled — global OR per-firm flag off.
+      NarratorDisabled — env, runtime-global, or per-firm flag off.
+      NarratorBudgetExhausted — per-firm monthly ceiling reached
+        (a NarratorDisabled subclass so 503 handlers keep working).
       FactsUnavailable — no readiness_snapshot for the triple.
       NumberHallucination — model emitted a bad number twice in a row.
       NarratorError — adapter or SDK failure.
     """
-    if not _firm_narrator_enabled(firm_id):
-        raise NarratorDisabled(
-            "narrator disabled for this firm "
-            "(firm admin can flip via PATCH /firm/settings)"
-        )
-    adapter = get_adapter()  # may raise NarratorDisabled (global flag)
+    _check_pre_call_gates(firm_id)
+    adapter = get_adapter()  # may raise NarratorDisabled (env-var gate)
     with firm_scoped_session(firm_id) as db:
         facts = build_facts(
             db,
@@ -444,93 +554,13 @@ def narrate_for_period(
 
 
 # ---------------------------------------------------------------------------
-# Cost + cache-hit meter (P2.4 Step 3)
+# Cost + cache-hit meter
 # ---------------------------------------------------------------------------
-
-
-# Provider list prices in USD per million tokens. Kept as module-level
-# constants so a price update is a one-line change and the operator can
-# grep for "PRICE_USD_PER_M" to find them. If we swap in another model
-# id, add a new dict entry keyed by the model id string.
-#
-# Source: provider pricing pages as of 2026-08. Update on any
-# announced price change — the estimate we return to the admin is a
-# best-effort forward-look, not a billed figure.
-_MODEL_PRICE_USD_PER_M: dict[str, dict[str, float]] = {
-    # Anthropic Opus 4.7
-    "claude-opus-4-7": {
-        "input": 15.00,
-        "output": 75.00,
-        # Cache read is 10x cheaper than fresh input.
-        "cache_read": 1.50,
-        # Cache creation is a one-time cost, ~25% premium over fresh input.
-        "cache_creation": 18.75,
-    },
-    # Anthropic Sonnet 4.6
-    "claude-sonnet-4-6": {
-        "input": 3.00,
-        "output": 15.00,
-        "cache_read": 0.30,
-        "cache_creation": 3.75,
-    },
-    # Anthropic Haiku 4.5 — current default (settings.narrator_model)
-    "claude-haiku-4-5-20251001": {
-        "input": 1.00,
-        "output": 5.00,
-        "cache_read": 0.10,
-        "cache_creation": 1.25,
-    },
-    # Google Gemini 2.5 Flash — cheapest workable option for the
-    # narrator task. Free tier available with different privacy terms
-    # (see docs/narrator-security.md §Provider policies).
-    "gemini-2.5-flash": {
-        "input": 0.35,
-        "output": 1.05,
-        # Gemini caching is opt-in via CachedContent objects and not
-        # wired in the current adapter. Set the cache prices anyway so
-        # a future caching-enabled build gets accurate numbers.
-        "cache_read": 0.09,
-        "cache_creation": 1.00,
-    },
-    # Google Gemini 2.5 Pro — higher quality vernacular, still cheap
-    "gemini-2.5-pro": {
-        "input": 1.25,
-        "output": 5.00,
-        "cache_read": 0.31,
-        "cache_creation": 1.25,
-    },
-}
-
-
-# Old name kept as an alias for any external caller that grepped the
-# module-level constant. Delete after one release cycle.
-_ANTHROPIC_PRICE_USD_PER_M = _MODEL_PRICE_USD_PER_M
-
-
-def _estimate_usd(model: str, usage: dict) -> Optional[float]:
-    """Best-effort USD estimate. None if model not in the price table.
-
-    We NULL rather than assume a default price so a dashboard shows
-    "unpriced model" loudly rather than a wrong number silently.
-    """
-    prices = _MODEL_PRICE_USD_PER_M.get(model)
-    if prices is None:
-        return None
-    it = usage.get("input_tokens") or 0
-    ot = usage.get("output_tokens") or 0
-    crt = usage.get("cache_read_input_tokens") or 0
-    cct = usage.get("cache_creation_input_tokens") or 0
-    # Fresh input tokens = input_tokens - cache_read - cache_creation
-    # (Anthropic reports these as disjoint counts; sum of all three is
-    # the total input the model processed.)
-    fresh_input = max(0, it - crt - cct)
-    total_micro = (
-        fresh_input * prices["input"]
-        + ot * prices["output"]
-        + crt * prices["cache_read"]
-        + cct * prices["cache_creation"]
-    )
-    return round(total_micro / 1_000_000, 6)
+# Pricing itself lives in :mod:`app.narrator.pricing` (Phase 1.4).
+# ``cost_paise`` is written at call time by :func:`_log_call`; the
+# aggregation below reads it directly from ``narrator_call_log`` and
+# never recomputes cost after the fact — that would let a pricing-
+# table update rewrite historical cost totals.
 
 
 def monthly_narrator_stats(
@@ -554,12 +584,18 @@ def monthly_narrator_stats(
         goal is "~90% cache-read on regenerations."
     ``per_model`` — list of ``{model, calls, input_tokens, output_tokens,
         cache_read_input_tokens, cache_creation_input_tokens,
-        estimated_usd}`` rows. Priced only for models in
-        ``_ANTHROPIC_PRICE_USD_PER_M``; unknown models return
-        ``estimated_usd=None`` so the dashboard flags them.
-    ``estimated_usd`` — sum of per_model estimates; None if ANY model
-        row was unpriced (so the admin can't misread partial data as
-        the total).
+        cost_paise, unpriced_calls}`` rows. ``cost_paise`` is the sum of
+        the ``narrator_call_log.cost_paise`` column for that model in
+        the window; NULL rows (unpriced model, or mock adapter with no
+        tokens) are excluded from the sum and counted in
+        ``unpriced_calls`` instead. A per_model row with all-unpriced
+        calls has ``cost_paise = 0`` and ``unpriced_calls = calls``.
+    ``cost_paise`` — sum across all models in the window. Excludes
+        unpriced rows.
+    ``any_unpriced`` — True if any priced-succeeded call in the window
+        had ``cost_paise IS NULL`` (unknown model). The dashboard
+        surfaces this so the CA cannot misread a partial total as the
+        real bill.
     ``latency_ms_p50`` / ``latency_ms_p95`` — median + 95th percentile
         across all logged calls. Uses percentile_cont, so approximate on
         small samples but the right shape for cost dashboards.
@@ -614,18 +650,29 @@ def monthly_narrator_stats(
             {"fid": str(firm_id), "y": year, "m": mm},
         ).mappings().all()
 
+        # Per-model aggregation. ``cost_paise`` sums the column
+        # written at call time so a later pricing-table update never
+        # rewrites historical cost totals. Unpriced rows (cost_paise
+        # IS NULL) are counted separately so the dashboard can flag a
+        # partial total honestly.
         per_model_rows = db.execute(
             text(
                 """
                 SELECT
                     model,
                     COUNT(*) AS calls,
+                    COUNT(*) FILTER (
+                        WHERE succeeded
+                          AND cost_paise IS NULL
+                          AND input_tokens IS NOT NULL
+                    ) AS unpriced_calls,
                     COALESCE(SUM(input_tokens), 0) AS input_tokens,
                     COALESCE(SUM(output_tokens), 0) AS output_tokens,
                     COALESCE(SUM(cache_read_input_tokens), 0)
                         AS cache_read_input_tokens,
                     COALESCE(SUM(cache_creation_input_tokens), 0)
-                        AS cache_creation_input_tokens
+                        AS cache_creation_input_tokens,
+                    COALESCE(SUM(cost_paise), 0) AS cost_paise
                 FROM narrator_call_log
                 WHERE firm_id = :fid
                   AND EXTRACT(YEAR FROM at) = :y
@@ -658,20 +705,13 @@ def monthly_narrator_stats(
         cache_hit_rate = None
 
     per_model: list[dict] = []
+    total_cost_paise = 0
     any_unpriced = False
-    total_usd = 0.0
     for r in per_model_rows:
-        usage_dict = {
-            "input_tokens": r["input_tokens"],
-            "output_tokens": r["output_tokens"],
-            "cache_read_input_tokens": r["cache_read_input_tokens"],
-            "cache_creation_input_tokens": r["cache_creation_input_tokens"],
-        }
-        usd = _estimate_usd(r["model"], usage_dict)
-        if usd is None:
+        unpriced = int(r["unpriced_calls"])
+        if unpriced > 0:
             any_unpriced = True
-        else:
-            total_usd += usd
+        total_cost_paise += int(r["cost_paise"])
         per_model.append(
             {
                 "model": r["model"],
@@ -682,7 +722,8 @@ def monthly_narrator_stats(
                 "cache_creation_input_tokens": int(
                     r["cache_creation_input_tokens"]
                 ),
-                "estimated_usd": usd,
+                "cost_paise": int(r["cost_paise"]),
+                "unpriced_calls": unpriced,
             }
         )
 
@@ -703,7 +744,9 @@ def monthly_narrator_stats(
         ),
         "cache_hit_rate": cache_hit_rate,
         "per_model": per_model,
-        "estimated_usd": None if any_unpriced else round(total_usd, 6),
+        "cost_paise": total_cost_paise,
+        "any_unpriced": any_unpriced,
+        "pricing_effective_from": pricing.PRICING_EFFECTIVE_FROM.isoformat(),
         "latency_ms_p50": (
             float(totals_row["latency_ms_p50"])
             if totals_row["latency_ms_p50"] is not None

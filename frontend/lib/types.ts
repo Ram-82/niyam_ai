@@ -239,7 +239,9 @@ export interface NarratorCostsPerModel {
   output_tokens: number;
   cache_read_input_tokens: number;
   cache_creation_input_tokens: number;
-  estimated_usd: number | null;
+  // Integer paise (spec: money is integer paise everywhere in transport).
+  cost_paise: number;
+  unpriced_calls: number;
 }
 
 export interface NarratorCosts {
@@ -255,7 +257,13 @@ export interface NarratorCosts {
   cache_creation_input_tokens: number;
   cache_hit_rate: number | null;
   per_model: NarratorCostsPerModel[];
-  estimated_usd: number | null;
+  // Integer paise. Sum across all models in the window.
+  cost_paise: number;
+  // True when at least one priced-succeeded call had an unknown
+  // model. Frontend surfaces this as a "partial total" caveat so a
+  // real bill is never rendered as the total.
+  any_unpriced: boolean;
+  pricing_effective_from: string;
   latency_ms_p50: number | null;
   latency_ms_p95: number | null;
 }

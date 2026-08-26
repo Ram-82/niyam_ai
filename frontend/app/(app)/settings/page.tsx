@@ -653,10 +653,16 @@ function NarratorCostsCard() {
     costs.cache_hit_rate === null
       ? "—"
       : `${costs.cache_hit_rate.toFixed(1)}%`;
-  const usdStr =
-    costs.estimated_usd === null
-      ? "unpriced model"
-      : `$${costs.estimated_usd.toFixed(4)}`;
+  // Money is integer paise on the wire (spec: no float/rupee decimals
+  // in transport). Format to ₹ at the edge, in whole rupees for a
+  // dashboard cell that already has other visual noise.
+  const rupees = Math.round(costs.cost_paise / 100).toLocaleString("en-IN");
+  const costStr =
+    costs.cost_paise === 0 && costs.any_unpriced
+      ? "unpriced model(s)"
+      : costs.any_unpriced
+        ? `≥ ₹${rupees} (partial — unpriced model present)`
+        : `₹${rupees}`;
 
   return (
     <div
@@ -703,10 +709,13 @@ function NarratorCostsCard() {
         <div>Est. cost</div>
         <div
           className="text-right font-mono"
-          data-testid="narrator-costs-usd"
+          data-testid="narrator-costs-cost"
         >
-          {usdStr}
+          {costStr}
         </div>
+      </div>
+      <div className="mt-2 text-ink-muted">
+        Priced at {costs.pricing_effective_from.slice(0, 10)}
       </div>
       {costs.latency_ms_p50 !== null && costs.latency_ms_p95 !== null ? (
         <div className="mt-2 text-ink-muted">

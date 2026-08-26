@@ -31,7 +31,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import CITEXT, JSONB, UUID
+from sqlalchemy.dialects.postgresql import CITEXT, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
@@ -87,6 +87,14 @@ class CAFirm(Base):
     # their own data before letting it reach clients.
     narrator_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
+    )
+    # NULL = no budget ceiling (the pre-Phase-1.4 default). When set,
+    # the narrator sums cost_paise on narrator_call_log for the current
+    # calendar month and raises NarratorBudgetExhausted before making a
+    # priced call that would cross this ceiling. Cheaper-model silent
+    # fallback is disallowed by policy — see P3_BUILD_PROMPT §3.1.4.
+    monthly_narrator_budget_paise: Mapped[Optional[int]] = mapped_column(
+        BigInteger, nullable=True
     )
     created_at: Mapped[datetime] = _created_at()
 
@@ -1029,5 +1037,35 @@ class OcrExtraction(Base):
         CheckConstraint(
             "overall_confidence BETWEEN 0.000 AND 1.000",
             name="ocr_extraction_confidence_range",
+        ),
+    )
+
+
+class LegalAcceptance(Base):
+    """APPEND ONLY. One row per firm/user acceptance of a versioned doc."""
+    __tablename__ = "legal_acceptance"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    firm_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ca_firm.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    doc_type: Mapped[str] = mapped_column(Text, nullable=False)
+    doc_version: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    ip_address: Mapped[Optional[str]] = mapped_column(INET, nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    __table_args__ = (
+        CheckConstraint(
+            "length(content_hash) = 64",
+            name="legal_acceptance_hash_len",
         ),
     )
