@@ -68,4 +68,5 @@ addopts = "-ra --strict-markers"
 markers = [
     "rls: tests that verify Row-Level Security isolation",
     "engine: reconciliation/validation engine tests",
+    "quarantine: tests deliberately excluded from CI pending fix or removal (must carry a tracked reason)",
 ]
