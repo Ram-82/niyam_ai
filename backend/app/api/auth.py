@@ -30,7 +30,9 @@ from app.auth.tokens import (
     Claims,
     TokenError,
     create_access_token,
+    create_access_token_for_firm,
     create_refresh_token,
+    create_refresh_token_for_firm,
     create_totp_setup_token,
     decode_token,
 )
@@ -486,4 +488,81 @@ def me(user: AppUser = Depends(get_current_user)) -> MeResponse:
         role=user.role,
         totp_confirmed=user.totp_confirmed,
         last_login_at=user.last_login_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# /switch-firm — Phase 2 multi-firm auth
+# ---------------------------------------------------------------------------
+
+
+class SwitchFirmRequest(BaseModel):
+    firm_id: uuid.UUID
+
+
+@router.post("/switch-firm", response_model=TokenPair)
+def switch_firm(
+    payload: SwitchFirmRequest,
+    user: AppUser = Depends(get_current_user),
+) -> TokenPair:
+    """Mint a new access+refresh pair with ``payload.firm_id`` as the
+    active firm.
+
+    Server-validates that the caller has a live ``user_firm_membership``
+    row for the target firm — a token with any other ``active_firm_id``
+    is rejected here (401) AND fails independently at the RLS layer.
+    Does NOT revoke the caller's other sessions; a switch is
+    additive from the token store's point of view.
+
+    Uses ``owner_session`` for the membership lookup because a switch
+    query spans firms by definition and an RLS-scoped read would only
+    see the caller's current firm's membership row.
+    """
+    from app.db import owner_session
+
+    with owner_session() as db:
+        row = db.execute(
+            text(
+                "SELECT role::text FROM user_firm_membership "
+                "WHERE user_id = :uid "
+                "  AND firm_id = :fid "
+                "  AND status = 'active'"
+            ),
+            {"uid": str(user.id), "fid": str(payload.firm_id)},
+        ).first()
+    if row is None:
+        # Do NOT leak whether the firm exists — the failure mode for
+        # "firm does not exist" and "user is not a member" must look
+        # identical to a caller enumerating firms.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="not a member of the requested firm",
+        )
+    role_in_target = row[0]
+    access_token, _ = create_access_token_for_firm(
+        user, payload.firm_id, role_in_target
+    )
+    refresh_token, _ = create_refresh_token_for_firm(
+        user, payload.firm_id, role_in_target
+    )
+    # Audit row lives in the FROM firm's log — where the switch
+    # originated. A parallel row could be written to the TO firm on
+    # first request there; keeping it single-log is enough for now.
+    with firm_scoped_session(user.firm_id) as session:
+        audit.record(
+            session=session,
+            firm_id=user.firm_id,
+            actor_user_id=user.id,
+            action="auth.switched_firm",
+            entity_type="ca_firm",
+            entity_id=payload.firm_id,
+            metadata={
+                "from_firm_id": str(user.firm_id),
+                "to_firm_id": str(payload.firm_id),
+            },
+        )
+    return TokenPair(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        expires_in=settings.jwt_access_ttl_seconds,
     )

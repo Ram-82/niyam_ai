@@ -63,6 +63,9 @@ TRUNCATE_ORDER = (
     "narrator_call_log",
     "readiness_snapshot",
     "consent_log",
+    "legal_acceptance",
+    "erasure_request",
+    "subject_key",
     "audit_log",
     "import_job",
     "gsp_pull_attempt",
@@ -71,6 +74,7 @@ TRUNCATE_ORDER = (
     "client_assignment",
     "gstin_profile",
     "user_invite",
+    "user_firm_membership",
     "app_user",
     "client",
     "ca_firm",
@@ -239,6 +243,7 @@ def bootstrap_firm():
         firm_name: str = "Test Firm",
         admin_email: str = "admin@example.com",
         admin_password: str = "Correct-Horse-Battery-Staple-42",
+        accept_legal: bool = True,
     ) -> dict:
         firm_id = uuid.uuid4()
         user_id = uuid.uuid4()
@@ -269,6 +274,47 @@ def bootstrap_firm():
                     "ts": secret,
                 },
             )
+            # Phase 2: every authenticated user must have a live
+            # user_firm_membership row. bootstrap_firm's admin is 1:1
+            # with the firm, mirroring the pre-Phase-2 model.
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO user_firm_membership (
+                        user_id, firm_id, role, status
+                    ) VALUES (
+                        :uid, :fid, 'admin', 'active'
+                    )
+                    ON CONFLICT (user_id, firm_id) DO NOTHING
+                    """
+                ),
+                {"uid": user_id, "fid": firm_id},
+            )
+            if accept_legal:
+                # An onboarded firm has accepted every required legal doc at
+                # its current hash. Tests that specifically exercise the
+                # acceptance gate pass ``accept_legal=False``.
+                from app.legal.documents import current_by_type
+                for doc in current_by_type().values():
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO legal_acceptance (
+                                firm_id, user_id, doc_type, doc_version,
+                                content_hash
+                            ) VALUES (
+                                :fid, :uid, :dt, :ver, :h
+                            )
+                            """
+                        ),
+                        {
+                            "fid": firm_id,
+                            "uid": user_id,
+                            "dt": doc.doc_type,
+                            "ver": doc.version,
+                            "h": doc.content_hash,
+                        },
+                    )
         created.append((str(firm_id), str(user_id)))
         return {
             "firm_id": firm_id,

@@ -112,7 +112,17 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="access token required",
         )
-    with next(_scoped_session_cm(claims.firm_id)) as session:
+    # Phase 2: the user's identity check runs on owner_session (RLS
+    # bypass) because app_user carries a legacy 1:1 firm_id that no
+    # longer authoritatively describes tenancy — a partner in firm A
+    # and firm B still has app_user.firm_id = A. A firm-scoped
+    # AppUser lookup pinned to B would return no row and give a false
+    # 401 for a legit membership. Tenancy IS enforced — by the
+    # user_firm_membership check below, run in the same session.
+    from app.db import owner_session
+    from sqlalchemy import text
+
+    with owner_session() as session:
         user = session.get(AppUser, uuid.UUID(claims.sub))
         if user is None:
             raise HTTPException(
@@ -129,6 +139,32 @@ def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="totp not confirmed",
             )
+        # Defence-in-depth: the JWT's active firm_id must map to a
+        # LIVE user_firm_membership row. Never trust the claim alone
+        # — a forged token that decodes cleanly still fails here
+        # because there is no membership row backing it. The lookup
+        # is intentionally narrow (user_id + firm_id + status='active')
+        # so a suspended or missing membership refuses the request.
+        row = session.execute(
+            text(
+                "SELECT role::text FROM user_firm_membership "
+                "WHERE user_id = :uid "
+                "  AND firm_id = :fid "
+                "  AND status = 'active'"
+            ),
+            {"uid": str(user.id), "fid": claims.firm_id},
+        ).first()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="not a member of the active firm",
+            )
+        # Override the loaded user's legacy fields so downstream
+        # handlers see the ACTIVE firm and role, not the home firm.
+        # This is what makes handlers Phase-2-aware without needing
+        # a signature change on every one.
+        user.firm_id = uuid.UUID(claims.firm_id)
+        user.role = row[0]
         # Force load of scalar attrs before session closes.
         _ = (
             user.id,
