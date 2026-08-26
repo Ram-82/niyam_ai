@@ -62,9 +62,6 @@ NON_INGRESS_ROUTES: FrozenSet[Route] = frozenset({
     ("POST", "/auth/register"),
     ("POST", "/auth/totp/setup"),
     ("POST", "/auth/totp/verify"),
-    # Phase 2 — mints a new token pair with a different active firm.
-    # No tenant data written; the audit_log row is metadata only.
-    ("POST", "/auth/switch-firm"),
 
     # --- legal itself: chicken-and-egg. accepting the gate cannot be gated
     #     by the gate.

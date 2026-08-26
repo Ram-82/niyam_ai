@@ -26,6 +26,7 @@ from app.api.firm import router as firm_router
 from app.api.gsp import router as gsp_router
 from app.api.imports import router as imports_router
 from app.api.invites import router as invites_router
+from app.api.legal import router as legal_router
 from app.api.narrator import router as narrator_router
 from app.api.ocr import router as ocr_router
 from app.api.reminders import router as reminders_router
@@ -85,6 +86,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(invites_router)
+app.include_router(legal_router)
 app.include_router(imports_router)
 app.include_router(command_center_router)
 app.include_router(clients_router)

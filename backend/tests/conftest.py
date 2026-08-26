@@ -63,6 +63,9 @@ TRUNCATE_ORDER = (
     "narrator_call_log",
     "readiness_snapshot",
     "consent_log",
+    "legal_acceptance",
+    "erasure_request",
+    "subject_key",
     "audit_log",
     "import_job",
     "gsp_pull_attempt",
@@ -239,6 +242,7 @@ def bootstrap_firm():
         firm_name: str = "Test Firm",
         admin_email: str = "admin@example.com",
         admin_password: str = "Correct-Horse-Battery-Staple-42",
+        accept_legal: bool = True,
     ) -> dict:
         firm_id = uuid.uuid4()
         user_id = uuid.uuid4()
@@ -269,6 +273,28 @@ def bootstrap_firm():
                     "ts": secret,
                 },
             )
+            if accept_legal:
+                from app.legal.documents import current_by_type
+                for doc in current_by_type().values():
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO legal_acceptance (
+                                firm_id, user_id, doc_type, doc_version,
+                                content_hash
+                            ) VALUES (
+                                :fid, :uid, :dt, :ver, :h
+                            )
+                            """
+                        ),
+                        {
+                            "fid": firm_id,
+                            "uid": user_id,
+                            "dt": doc.doc_type,
+                            "ver": doc.version,
+                            "h": doc.content_hash,
+                        },
+                    )
         created.append((str(firm_id), str(user_id)))
         return {
             "firm_id": firm_id,
