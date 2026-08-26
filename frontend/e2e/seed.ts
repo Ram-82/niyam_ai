@@ -75,6 +75,7 @@ export async function seedFirmAndData(): Promise<Seed> {
 import os, uuid, secrets, pyotp, base64
 from sqlalchemy import create_engine, text
 from app.auth.passwords import hash_password
+from app.legal.documents import current_by_type
 
 engine = create_engine("postgresql+psycopg://niyam:niyam@postgres:5432/niyam")
 firm_id = uuid.uuid4()
@@ -96,6 +97,22 @@ with engine.begin() as conn:
         {"id": user_id, "fid": firm_id, "email": ${JSON.stringify(email)},
          "ph": hash_password(${JSON.stringify(password)}), "ts": secret},
     )
+    # Pre-accept every required legal document so subsequent API calls
+    # (POST /clients, POST /gsp/pull, etc.) are not blocked by
+    # require_legal_accepted. The P4 Phase D interceptor will make this
+    # user-facing; the e2e seed short-circuits it.
+    for doc in current_by_type().values():
+        conn.execute(
+            text("""
+                INSERT INTO legal_acceptance (
+                    firm_id, user_id, doc_type, doc_version, content_hash
+                ) VALUES (
+                    :fid, :uid, :dt, :ver, :h
+                )
+            """),
+            {"fid": firm_id, "uid": user_id,
+             "dt": doc.doc_type, "ver": doc.version, "h": doc.content_hash},
+        )
 
 print(f"{firm_id}|{user_id}|{secret}")
 `;
