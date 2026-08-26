@@ -37,6 +37,9 @@ dependencies = [
     "pytesseract>=0.3.10",
     "pdf2image>=1.17",
     "Pillow>=10.0",
+    # Prometheus /metrics endpoint (Phase 1.6). Chose over OTel: single
+    # in-process registry, no collector to run, standard scrape shape.
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
@@ -64,8 +67,13 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# Default: exclude ``quarantine`` from every run. CI mirrors this via
+# an explicit ``-m "not quarantine"`` in ``.github/workflows/ci.yml`` so
+# quarantined tests never fail the gate but every quarantine entry is
+# still visible in the file with a ``# TODO-QUARANTINE`` note.
+addopts = "-ra --strict-markers -m 'not quarantine'"
 markers = [
     "rls: tests that verify Row-Level Security isolation",
     "engine: reconciliation/validation engine tests",
+    "quarantine: tests deliberately excluded from CI pending fix or removal (must carry a tracked reason)",
 ]

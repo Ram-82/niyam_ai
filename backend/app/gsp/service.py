@@ -231,6 +231,13 @@ def _log_call(
             "ms": int((time.time() - started_at) * 1000),
         },
     )
+    # Prometheus counter (Phase 1.6). Outcome bucket == error_kind
+    # when set (so 'auth_error', 'rate_limited', etc. map 1:1 to log
+    # rows); 'success' when succeeded.
+    from app.observability import metrics
+
+    outcome = "success" if succeeded else (error_kind or "error")
+    metrics.gsp_pull_total.labels(outcome=outcome).inc()
 
 
 # ---------------------------------------------------------------------------
