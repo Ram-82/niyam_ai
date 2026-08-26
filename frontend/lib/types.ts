@@ -228,7 +228,44 @@ export interface FirmSettings {
   name: string;
   plan: string;
   reminders_enabled: boolean;
+  narrator_enabled: boolean;
   admin_whatsapp_number: string | null;
+}
+
+export interface NarratorCostsPerModel {
+  model: string;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  // Integer paise (spec: money is integer paise everywhere in transport).
+  cost_paise: number;
+  unpriced_calls: number;
+}
+
+export interface NarratorCosts {
+  firm_id: string;
+  month: string;
+  total_calls: number;
+  succeeded: number;
+  failed: number;
+  failures_by_kind: Record<string, number>;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_hit_rate: number | null;
+  per_model: NarratorCostsPerModel[];
+  // Integer paise. Sum across all models in the window.
+  cost_paise: number;
+  // True when at least one priced-succeeded call had an unknown
+  // model. Frontend surfaces this as a "partial total" caveat so a
+  // real bill is never rendered as the total.
+  any_unpriced: boolean;
+  pricing_effective_from: string;
+  latency_ms_p50: number | null;
+  latency_ms_p95: number | null;
 }
 
 export interface RulePackRow {
@@ -481,4 +518,91 @@ export interface AuditRow {
   entity_id: string | null;
   diff: Record<string, unknown>;
   at: string;
+}
+
+
+// ---------------------------------------------------------------------------
+// OCR (P2.1) — invoice extraction
+// ---------------------------------------------------------------------------
+
+
+// One extracted field: what the adapter found + how sure it was.
+// ``value`` is a stringified representation (paise fields are decimal
+// strings, dates ISO, etc.) so the review UI can bind directly to a
+// text ``<input>`` without any type conversion on the frontend.
+export interface OcrFieldValue {
+  value: string | null;
+  confidence: number; // 0.0 .. 1.0
+}
+
+
+// The nine editable extraction fields. Keep in sync with
+// backend/app/ocr/service.py :: _EDITABLE_FIELDS.
+export type OcrFieldName =
+  | "supplier_gstin"
+  | "invoice_number"
+  | "invoice_date"
+  | "taxable_value_paise"
+  | "cgst_paise"
+  | "sgst_paise"
+  | "igst_paise"
+  | "total_paise"
+  | "hsn_sac";
+
+
+// Response body of POST /ocr/invoice and GET /ocr/extractions/{id}.
+export interface OcrExtraction {
+  id: string;
+  firm_id: string;
+  gstin_profile_id: string;
+  direction: "purchase" | "sale";
+  status: "draft" | "accepted" | "rejected";
+  created_at: string;
+
+  adapter: string;
+  adapter_version: string;
+  source_filename: string;
+  source_content_hash: string;
+  source_bytes_size: number;
+
+  supplier_gstin: OcrFieldValue;
+  invoice_number: OcrFieldValue;
+  invoice_date: OcrFieldValue;
+  taxable_value_paise: OcrFieldValue;
+  cgst_paise: OcrFieldValue;
+  sgst_paise: OcrFieldValue;
+  igst_paise: OcrFieldValue;
+  total_paise: OcrFieldValue;
+  hsn_sac: OcrFieldValue;
+
+  overall_confidence: number;
+  warnings: string[];
+  low_confidence_threshold: number;
+}
+
+
+// Compact row for GET /ocr/extractions.
+export interface OcrExtractionListRow {
+  id: string;
+  gstin_profile_id: string;
+  direction: "purchase" | "sale";
+  status: "draft" | "accepted" | "rejected";
+  adapter: string;
+  source_filename: string;
+  source_bytes_size: number;
+  overall_confidence: number;
+  created_at: string;
+}
+
+
+export interface OcrAcceptResp {
+  extraction_id: string;
+  invoice_id: string;
+  status: "accepted";
+}
+
+
+export interface OcrRejectResp {
+  extraction_id: string;
+  status: "rejected";
 }

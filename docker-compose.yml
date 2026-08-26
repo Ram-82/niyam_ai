@@ -52,6 +52,12 @@ services:
       UPLOAD_DIR: /data/uploads
       GSP_MODE: ${GSP_MODE:-mock}
       GSP_BASE_URL: ${GSP_BASE_URL:-http://gsp-mock:9000}
+      GSP_CLIENT_ID: ${GSP_CLIENT_ID:-}
+      GSP_CLIENT_SECRET: ${GSP_CLIENT_SECRET:-}
+      GSP_GST_USERNAME: ${GSP_GST_USERNAME:-}
+      GSP_IP_ADDRESS: ${GSP_IP_ADDRESS:-}
+      GSP_DEVELOPER_EMAIL: ${GSP_DEVELOPER_EMAIL:-}
+      GSP_ENCRYPTION_KEYS: ${GSP_ENCRYPTION_KEYS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +82,12 @@ services:
       UPLOAD_DIR: /data/uploads
       GSP_MODE: ${GSP_MODE:-mock}
       GSP_BASE_URL: ${GSP_BASE_URL:-http://gsp-mock:9000}
+      GSP_CLIENT_ID: ${GSP_CLIENT_ID:-}
+      GSP_CLIENT_SECRET: ${GSP_CLIENT_SECRET:-}
+      GSP_GST_USERNAME: ${GSP_GST_USERNAME:-}
+      GSP_IP_ADDRESS: ${GSP_IP_ADDRESS:-}
+      GSP_DEVELOPER_EMAIL: ${GSP_DEVELOPER_EMAIL:-}
+      GSP_ENCRYPTION_KEYS: ${GSP_ENCRYPTION_KEYS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -99,6 +111,20 @@ services:
       UPLOAD_DIR: /data/uploads
       GSP_MODE: ${GSP_MODE:-mock}
       GSP_BASE_URL: ${GSP_BASE_URL:-http://gsp-mock:9000}
+      # WhiteBooks-mode creds. Populated from .env when GSP_MODE=whitebooks.
+      # Left empty in mock mode; the Settings validator only enforces them
+      # when gsp_mode='whitebooks'.
+      GSP_CLIENT_ID: ${GSP_CLIENT_ID:-}
+      GSP_CLIENT_SECRET: ${GSP_CLIENT_SECRET:-}
+      GSP_GST_USERNAME: ${GSP_GST_USERNAME:-}
+      GSP_IP_ADDRESS: ${GSP_IP_ADDRESS:-}
+      GSP_DEVELOPER_EMAIL: ${GSP_DEVELOPER_EMAIL:-}
+      GSP_ENCRYPTION_KEYS: ${GSP_ENCRYPTION_KEYS:-}
+      # Phase 1.3 (P3) — key-encryption key for the erasure mechanism.
+      # Required outside mock mode. Dev value below matches the mock
+      # fallback in app.erasure.keys so a local stack with
+      # GSP_MODE=whitebooks (or anything not-mock) still boots.
+      ERASURE_KEK_KEYS: ${ERASURE_KEK_KEYS:-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
       # Enable the P2 modules for dev + e2e. Both use mock transports
       # (deterministic template narration, in-memory wamid.mock ids)
       # so no external calls fire.
@@ -106,6 +132,11 @@ services:
       NARRATOR_MODE: ${NARRATOR_MODE:-mock}
       WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-1}
       WHATSAPP_MODE: ${WHATSAPP_MODE:-mock}
+      # OCR (P2.1). Default mock so a stock ``docker compose up`` shows
+      # the review UI end-to-end with deterministic extractions. Flip
+      # OCR_MODE=pdfminer / tesseract when demoing real extraction.
+      OCR_ENABLED: ${OCR_ENABLED:-1}
+      OCR_MODE: ${OCR_MODE:-mock}
     ports:
       - "8000:8000"
     depends_on:

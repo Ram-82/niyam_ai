@@ -10,7 +10,7 @@ gated by the CA-approval + delivery surfaces (P3 scope).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,12 +18,13 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.api.deps import get_current_user, get_firm_scoped_session
+from app.api.deps import get_current_user, get_firm_scoped_session, require_admin
 from app.models.tables import AppUser
 from app.narrator import service
 from app.narrator.facts_builder import FactsUnavailable
 from app.narrator.types import (
     Language,
+    NarratorBudgetExhausted,
     NarratorDisabled,
     NarratorError,
     NumberHallucination,
@@ -75,6 +76,19 @@ def preview(
             period=payload.period,
             language=payload.language,  # type: ignore[arg-type]
             user_id=user.id,
+        )
+    except NarratorBudgetExhausted as e:
+        # NarratorBudgetExhausted subclasses NarratorDisabled so the
+        # generic 503 path still catches it; we surface a distinct
+        # detail string so the frontend can render an honest
+        # "monthly budget reached" message per the frozen-label rule.
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "narrator_budget_exhausted",
+                "used_paise": e.used_paise,
+                "budget_paise": e.budget_paise,
+            },
         )
     except NarratorDisabled:
         raise HTTPException(status_code=503, detail="narrator_disabled")
@@ -168,3 +182,73 @@ def get_narration_pdf(
             )
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Cost + cache-hit meter (P2.4 Step 3) — admin only
+# ---------------------------------------------------------------------------
+
+
+class NarratorCostsPerModel(BaseModel):
+    model: str
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+    # Integer paise (Phase 1.4). Sum of narrator_call_log.cost_paise
+    # for this model in the window; unpriced-model rows are excluded
+    # from this sum and counted in ``unpriced_calls`` instead.
+    cost_paise: int
+    unpriced_calls: int
+
+
+class NarratorCostsResp(BaseModel):
+    firm_id: str
+    month: str
+    total_calls: int
+    succeeded: int
+    failed: int
+    failures_by_kind: dict[str, int]
+    input_tokens: int
+    output_tokens: int
+    cache_read_input_tokens: int
+    cache_creation_input_tokens: int
+    cache_hit_rate: Optional[float]  # 0.0-100.0 percent; None if no LLM calls
+    per_model: list[NarratorCostsPerModel]
+    # Integer paise (spec: money is integer paise everywhere in
+    # storage and transport). Sum across all models in the window.
+    cost_paise: int
+    # True when at least one priced-succeeded call had an unknown
+    # model (cost_paise IS NULL). Callers surface this as a "partial
+    # total" warning so a real bill is never rendered as the total.
+    any_unpriced: bool
+    # ISO-8601 stamp of the pricing table used at call time. Frontend
+    # can render "priced at <date>" so a stale table is visible.
+    pricing_effective_from: str
+    latency_ms_p50: Optional[float]
+    latency_ms_p95: Optional[float]
+
+
+@router.get("/costs", response_model=NarratorCostsResp)
+def costs(
+    admin: AppUser = Depends(require_admin),
+    month: Optional[str] = Query(default=None, pattern=r"^\d{6}$"),
+) -> NarratorCostsResp:
+    """Aggregate cost + cache-hit metrics from ``narrator_call_log``.
+
+    Admin-only. Reads only the caller's firm (RLS enforced). Default
+    month is the current calendar month in UTC (aligns with the GSP
+    usage endpoint's semantics).
+
+    The ``cache_hit_rate`` field is the load-bearing P2.4 metric — the
+    goal is ~90% cache-read on regenerations. A low number means the
+    system prompt is being rebuilt fresh too often (invalidation event
+    every call, or too many concurrent creators overrunning the
+    ephemeral cache TTL).
+    """
+    if month is None:
+        now = datetime.now(tz=timezone.utc)
+        month = f"{now.year:04d}{now.month:02d}"
+    data = service.monthly_narrator_stats(firm_id=admin.firm_id, month=month)
+    return NarratorCostsResp(**data)

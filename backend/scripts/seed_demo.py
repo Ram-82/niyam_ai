@@ -67,6 +67,7 @@ from app.engines.reconciliation.service import reconcile_period
 from app.engines.scoring.service import compute_and_persist
 from app.engines.validation.gstin import compute_check_digit
 from app.engines.validation.service import validate_period
+from app.rules.default_pack import PAYLOAD as _RULE_PACK_PAYLOAD, VERSION as _RULE_PACK_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -140,13 +141,33 @@ TENANT_TABLES = (
 
 
 def wipe() -> None:
-    """Nuke every tenant table so re-runs are idempotent. Rule pack
-    (global config) is left alone."""
+    """Nuke every tenant table so re-runs are idempotent.
+
+    Note: ``rule_pack.firm_id`` FK-CASCADEs to ``ca_firm.id``, so
+    ``TRUNCATE ca_firm CASCADE`` follows the FK and drops the entire
+    ``rule_pack`` table — including the global (``firm_id IS NULL``)
+    row that scoring/validation need. TRUNCATE CASCADE is table-level,
+    not row-level. We re-seed the global pack from
+    ``app.rules.default_pack`` right after the truncate.
+    """
     with owner_engine.begin() as conn:
         conn.execute(text(
             f"TRUNCATE TABLE {', '.join(TENANT_TABLES)} "
             f"RESTART IDENTITY CASCADE"
         ))
+        conn.execute(
+            text(
+                "INSERT INTO rule_pack (version, payload, active, notes) "
+                "VALUES (:v, CAST(:p AS JSONB), TRUE, :n) "
+                "ON CONFLICT (version) DO UPDATE SET "
+                "  active = EXCLUDED.active, payload = EXCLUDED.payload"
+            ),
+            {
+                "v": _RULE_PACK_VERSION,
+                "p": json.dumps(_RULE_PACK_PAYLOAD),
+                "n": "Re-seeded by scripts.seed_demo after wipe",
+            },
+        )
 
 
 def make_firm_and_admin() -> None:
@@ -693,7 +714,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         tz = ZoneInfo(settings.display_tz)
         today = datetime.now(tz=tz).date()
 
-    print(f"→ Wiping tenant tables (rule_pack survives) …")
+    print(f"→ Wiping tenant tables + re-seeding global rule_pack …")
     wipe()
     print(f"→ Seeding firm + admin + client + gstin_profile …")
     make_firm_and_admin()

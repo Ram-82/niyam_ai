@@ -56,6 +56,10 @@ import type {
 type Panel =
   | { state: "idle" }                                    // ready to generate
   | { state: "narrator_disabled" }                       // NARRATOR_ENABLED=false
+  // Per-firm monthly budget reached — server refused the call. Distinct
+  // from narrator_disabled so the CA sees an honest, actionable message
+  // instead of "an admin needs to flip an env var" (Phase 1.4).
+  | { state: "narrator_budget_exhausted"; usedPaise: number; budgetPaise: number }
   | { state: "whatsapp_disabled"; narration?: NarrationOutput }  // WHATSAPP_ENABLED=false
   | { state: "narration_ready"; narration: NarrationOutput }
   | { state: "preparing"; narration: NarrationOutput };
@@ -124,8 +128,29 @@ export function DeliveryPanel({
       setPanel({ state: "narration_ready", narration: out });
     } catch (e) {
       if (e instanceof ApiError && e.status === 503) {
-        const detail = (e as ApiError).message ?? "";
-        if (detail.includes("narrator_disabled")) {
+        // detail can be a plain string ("narrator_disabled") OR the
+        // structured budget-exhausted payload {code, used_paise,
+        // budget_paise}. The api client stringifies structured detail
+        // to "[object Object]" in .message, so read the parsed body.
+        const body = (e as ApiError).body as
+          | { detail?: unknown }
+          | null;
+        const detail = body?.detail;
+        if (
+          detail !== null &&
+          typeof detail === "object" &&
+          (detail as { code?: string }).code === "narrator_budget_exhausted"
+        ) {
+          const d = detail as { used_paise: number; budget_paise: number };
+          setPanel({
+            state: "narrator_budget_exhausted",
+            usedPaise: d.used_paise,
+            budgetPaise: d.budget_paise,
+          });
+          return;
+        }
+        const msg = typeof detail === "string" ? detail : (e as ApiError).message ?? "";
+        if (msg.includes("narrator_disabled")) {
           setPanel({ state: "narrator_disabled" });
         } else {
           // WhatsApp disabled mid-session.
@@ -245,6 +270,13 @@ export function DeliveryPanel({
 
       {panel.state === "narrator_disabled" && <NarratorDisabledCallout />}
 
+      {panel.state === "narrator_budget_exhausted" && (
+        <NarratorBudgetExhaustedCallout
+          usedPaise={panel.usedPaise}
+          budgetPaise={panel.budgetPaise}
+        />
+      )}
+
       {panel.state === "whatsapp_disabled" && <WhatsAppDisabledCallout />}
 
       {(panel.state === "idle" ||
@@ -325,6 +357,33 @@ function NarratorDisabledCallout() {
       An admin needs to set <span className="font-mono">NARRATOR_ENABLED=true</span>{" "}
       (and optionally <span className="font-mono">NARRATOR_MODE=mock</span> to use the
       template engine without an API key).
+    </div>
+  );
+}
+
+
+function NarratorBudgetExhaustedCallout({
+  usedPaise,
+  budgetPaise,
+}: {
+  usedPaise: number;
+  budgetPaise: number;
+}) {
+  // Whole rupees is enough resolution for an admin decision. No silent
+  // fallback to a cheaper model — the spec (P3_BUILD_PROMPT §3.1.4)
+  // explicitly forbids degradation, so we tell the CA the truth.
+  const used = Math.round(usedPaise / 100).toLocaleString("en-IN");
+  const budget = Math.round(budgetPaise / 100).toLocaleString("en-IN");
+  return (
+    <div
+      className="text-sm p-3 bg-amber-bg border border-rule rounded-md text-amber-fg"
+      data-testid="narrator-budget-exhausted-callout"
+    >
+      <span className="font-semibold">
+        Narration disabled — monthly budget reached (₹{used} of ₹{budget}).
+      </span>{" "}
+      Ask a firm admin to raise <span className="font-mono">monthly_narrator_budget_paise</span>{" "}
+      or wait until the next calendar month.
     </div>
   );
 }

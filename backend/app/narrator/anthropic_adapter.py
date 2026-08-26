@@ -32,6 +32,7 @@ from app.narrator.types import (
     NarrationFacts,
     NarrationOutput,
     NarratorError,
+    TokenUsage,
 )
 
 
@@ -219,6 +220,10 @@ class AnthropicNarrator:
             raise NarratorError(
                 f"anthropic returned non-JSON body (first 200 chars): {raw[:200]!r}"
             ) from e
+        # Extract cost meter fields from msg.usage. The SDK exposes
+        # these as attributes on a pydantic model; use getattr so the
+        # code doesn't crash if a future SDK version renames a field.
+        usage = getattr(msg, "usage", None)
         return NarrationOutput(
             page1_health=str(payload.get("page1_health", "")).strip(),
             page1_tax_position=str(payload.get("page1_tax_position", "")).strip(),
@@ -227,4 +232,14 @@ class AnthropicNarrator:
             provider=self.provider,
             model=self.model,
             language=language,
+            usage=TokenUsage(
+                input_tokens=getattr(usage, "input_tokens", None),
+                output_tokens=getattr(usage, "output_tokens", None),
+                cache_read_input_tokens=getattr(
+                    usage, "cache_read_input_tokens", None
+                ),
+                cache_creation_input_tokens=getattr(
+                    usage, "cache_creation_input_tokens", None
+                ),
+            ),
         )

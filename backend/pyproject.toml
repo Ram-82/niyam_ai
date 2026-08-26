@@ -29,6 +29,17 @@ dependencies = [
     "jinja2>=3.1",
     "weasyprint>=62.0",
     "gunicorn>=22.0",
+    # OCR (P2.1 Step 3a + 3b). pdfminer.six for text-native PDFs;
+    # pytesseract + pdf2image + Pillow for scanned PDFs / photos.
+    # pdf2image shells out to poppler-utils and pytesseract shells out
+    # to the tesseract-ocr binary — see Dockerfile for the apt install.
+    "pdfminer.six>=20240706",
+    "pytesseract>=0.3.10",
+    "pdf2image>=1.17",
+    "Pillow>=10.0",
+    # Prometheus /metrics endpoint (Phase 1.6). Chose over OTel: single
+    # in-process registry, no collector to run, standard scrape shape.
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +51,6 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "types-python-dateutil",
-    "pdfminer.six>=20240706",
     "pytest-timeout>=2.3",
 ]
 
@@ -57,8 +67,13 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# Default: exclude ``quarantine`` from every run. CI mirrors this via
+# an explicit ``-m "not quarantine"`` in ``.github/workflows/ci.yml`` so
+# quarantined tests never fail the gate but every quarantine entry is
+# still visible in the file with a ``# TODO-QUARANTINE`` note.
+addopts = "-ra --strict-markers -m 'not quarantine'"
 markers = [
     "rls: tests that verify Row-Level Security isolation",
     "engine: reconciliation/validation engine tests",
+    "quarantine: tests deliberately excluded from CI pending fix or removal (must carry a tracked reason)",
 ]

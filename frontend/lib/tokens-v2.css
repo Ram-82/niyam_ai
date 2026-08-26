@@ -1,0 +1,272 @@
+/* ---------------------------------------------------------------------------
+ * Niyam AI — v2 design tokens (ported from design_handoff_niyam_ai/app).
+ *
+ * Scoped to [data-theme-v="2"] so v1 tokens in lib/tokens.css stay
+ * untouched. v2 route group wraps children in <div data-theme-v="2">;
+ * v1 pages continue to see the original :root tokens.
+ *
+ * Dark mode uses the compound selector [data-theme-v="2"][data-theme="dark"]
+ * so v1 dark mode (if ever added) and v2 dark mode stay independent.
+ * ------------------------------------------------------------------------- */
+
+[data-theme-v="2"] {
+  /* -- Color: base ------------------------------------------------------- */
+  --bg: #FAFAFB;
+  --surface: #FFFFFF;
+  --border: #E5E7EB;
+  --border-strong: #D1D5DB;
+
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #94A3B8;
+
+  --accent: #2447F2;
+  --accent-soft: #EEF1FE;
+
+  --success: #059669;
+  --success-soft: #ECFDF5;
+  --warning: #D97706;
+  --warning-soft: #FEF3C7;
+  --danger: #DC2626;
+  --danger-soft: #FEE2E2;
+
+  --hl-danger: rgba(220, 38, 38, 0.10);
+  --hl-warning: rgba(217, 119, 6, 0.12);
+  --hl-success: rgba(5, 150, 105, 0.10);
+  --hl-accent: rgba(36, 71, 242, 0.10);
+
+  /* -- Color: derived roles (light) -------------------------------------- */
+  --row-hover: #F3F4F7;
+  --group-header: #F3F4F7;
+  --group-header-danger: #FDF2F2;
+  --accent-panel-bg: #F4F6FE;
+  --accent-panel-border: #C9D4FB;
+  --skeleton: #EDEFF3;
+  --danger-zone-bg: #FEF5F5;
+  --danger-zone-divider: #F3C7C7;
+  --row-hover-accent: #F5F7FE;
+  --on-accent: #FFFFFF;
+
+  /* -- Typography (Inter + JetBrains Mono via next/font) ----------------- */
+  --font-sans-v2: var(--font-v2-sans), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono-v2: var(--font-v2-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Hierarchy rule: Hero numeric > body text ratio must be ≥ 2×. */
+  --fs-hero: 64px;         --lh-hero: 72px;
+  --fs-section: 44px;      --lh-section: 52px;
+  --fs-page: 40px;         --lh-page: 48px;
+  --fs-hero-score: 44px;   --lh-hero-score: 44px;
+  --fs-display: 32px;      --lh-display: 40px;
+  --fs-money-lg: 28px;     --lh-money-lg: 36px;
+  --fs-h1: 24px;           --lh-h1: 32px;
+  --fs-suffix: 20px;       --lh-suffix: 28px;
+  --fs-h2: 18px;           --lh-h2: 28px;
+  --fs-body-lg: 17px;      --lh-body-lg: 28px;
+  --fs-body: 14px;         --lh-body: 20px;
+  --fs-body-marketing: 15px; --lh-body-marketing: 24px;
+  --fs-label: 12px;        --lh-label: 16px;
+  --fs-meta: 11px;         --lh-meta: 16px;
+  --fs-mono: 13px;         --lh-mono: 20px;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semi: 600;
+
+  --tr-hero: -0.03em;
+  --tr-section: -0.02em;
+  --tr-page: -0.02em;
+  --tr-display: -0.02em;
+  --tr-h1: -0.01em;
+  --tr-h2: 0;
+  --tr-body: 0;
+  --tr-label: 0.02em;
+  --tr-nav: -0.01em;
+
+  /* -- Spacing (app scale, 8pt-ish) ------------------------------------- */
+  --v2-space-1: 4px;
+  --v2-space-2: 8px;
+  --v2-space-3: 12px;
+  --v2-space-4: 16px;
+  --v2-space-5: 24px;
+  --v2-space-6: 32px;
+  --v2-space-7: 48px;
+  --v2-space-8: 64px;
+
+  /* -- Spacing (marketing scale) ---------------------------------------- */
+  --mkt-1: 8px;
+  --mkt-2: 16px;
+  --mkt-3: 24px;
+  --mkt-4: 32px;
+  --mkt-5: 48px;
+  --mkt-6: 64px;
+  --mkt-7: 96px;
+  --mkt-8: 128px;
+  --mkt-9: 160px;
+
+  /* -- Radius ----------------------------------------------------------- */
+  --radius-marketing-card: 12px;
+  --radius-app-card: 10px;
+  --radius-input: 8px;
+  --radius-chip: 6px;
+  --radius-pill: 999px;
+
+  /* -- Elevation -------------------------------------------------------- */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-workspace-popover: 0 4px 24px rgba(15, 23, 42, 0.10);
+  --shadow-event-popover: 0 4px 12px rgba(15, 23, 42, 0.10);
+  --shadow-modal: 0 8px 24px rgba(15, 23, 42, 0.14);
+  --shadow-hero-preview: 0 12px 40px rgba(15, 23, 42, 0.10);
+  --shadow-sticky-up: 0 -4px 12px rgba(15, 23, 42, 0.04);
+  --shadow-paper: 0 1px 4px rgba(15, 23, 42, 0.06);
+  --shadow-fab: 0 4px 12px rgba(15, 23, 42, 0.16);
+  --shadow-auth-card: 0 1px 2px rgba(15, 23, 42, 0.06),
+                      0 8px 24px rgba(15, 23, 42, 0.06);
+
+  /* -- Auth (chromeless) canvas roles ----------------------------------- */
+  --auth-brand-bg: #F6F7FC;
+  --auth-dot: rgba(15, 23, 42, 0.06);
+
+  /* -- Focus ring ------------------------------------------------------- */
+  --focus-color: var(--accent);
+  --focus-width: 2px;
+  --focus-offset: 2px;
+
+  /* -- Motion ----------------------------------------------------------- */
+  --dur-fast: 120ms;
+  --dur-med: 200ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Apply the v2 canvas + font on the wrapper itself */
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans-v2);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+}
+
+/* --- Dark ---------------------------------------------------------------- */
+[data-theme-v="2"][data-theme="dark"] {
+  --bg: #0B0D12;
+  --surface: #12151C;
+  --border: #1F2430;
+  --border-strong: #2A3040;
+
+  --text-primary: #F1F5F9;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+
+  --accent: #4C6FFF;
+  --accent-soft: #1A2140;
+
+  --success: #34D399;
+  --success-soft: #10291F;
+  --warning: #FBBF24;
+  --warning-soft: #2E2409;
+  --danger: #F87171;
+  --danger-soft: #331A1A;
+
+  --hl-danger: rgba(248, 113, 113, 0.16);
+  --hl-warning: rgba(251, 191, 36, 0.18);
+  --hl-success: rgba(52, 211, 153, 0.14);
+  --hl-accent: rgba(76, 111, 255, 0.16);
+
+  --row-hover: #1F2430;
+  --group-header: #1A1F29;
+  --group-header-danger: #2B1418;
+  --accent-panel-bg: #141A2C;
+  --accent-panel-border: #2B3760;
+  --skeleton: #1B202B;
+  --danger-zone-bg: #1E1214;
+  --danger-zone-divider: #4A2020;
+  --row-hover-accent: #1A2140;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-workspace-popover: 0 4px 24px rgba(0, 0, 0, 0.6);
+  --shadow-event-popover: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.7);
+  --shadow-hero-preview: 0 12px 40px rgba(0, 0, 0, 0.6);
+  --shadow-sticky-up: 0 -4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-paper: 0 1px 4px rgba(0, 0, 0, 0.5);
+  --shadow-fab: 0 4px 12px rgba(0, 0, 0, 0.6);
+  --shadow-auth-card: 0 1px 2px rgba(0, 0, 0, 0.5),
+                      0 8px 24px rgba(0, 0, 0, 0.5);
+
+  --auth-brand-bg: #0E1118;
+  --auth-dot: rgba(241, 245, 249, 0.06);
+}
+
+/* Utility classes scoped to v2 pages only. */
+[data-theme-v="2"] .tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+[data-theme-v="2"] .mono {
+  font-family: var(--font-mono-v2);
+  font-size: var(--fs-mono);
+  line-height: var(--lh-mono);
+}
+
+/* --- Interactive states used across primitives + shell ------------------- */
+[data-theme-v="2"] .v2-focus:focus-visible,
+[data-theme-v="2"] .v2-focus:focus {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+[data-theme-v="2"] .v2-focus-inset:focus-visible,
+[data-theme-v="2"] .v2-focus-inset:focus {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+[data-theme-v="2"] .v2-nav-link:hover {
+  background: var(--row-hover);
+  color: var(--text-primary);
+}
+[data-theme-v="2"] .v2-hover-tint:hover {
+  background: var(--row-hover);
+}
+[data-theme-v="2"] .v2-btn-primary:hover {
+  filter: brightness(1.08);
+}
+[data-theme-v="2"] .v2-btn-secondary:hover {
+  background: var(--row-hover);
+}
+[data-theme-v="2"] .v2-search-wrap:focus-within {
+  border-color: var(--accent);
+}
+[data-theme-v="2"] .v2-kpi:hover {
+  border-color: var(--border-strong);
+}
+[data-theme-v="2"] .v2-row:hover {
+  background: var(--row-hover-accent);
+}
+[data-theme-v="2"] .v2-row:hover .v2-row-actions {
+  opacity: 1;
+}
+[data-theme-v="2"] .v2-row-actions {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+[data-theme-v="2"] .v2-sort-th:hover {
+  color: var(--text-secondary);
+}
+
+/* Skeleton shimmer used in dashboard loading state. */
+@keyframes v2-shimmer {
+  0% { background-position: -600px 0; }
+  100% { background-position: 600px 0; }
+}
+[data-theme-v="2"] .v2-skeleton {
+  background-color: var(--skeleton);
+  background-image: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%);
+  background-repeat: no-repeat;
+  background-size: 600px 100%;
+  animation: v2-shimmer 1.4s ease-in-out infinite;
+}
+[data-theme-v="2"][data-theme="dark"] .v2-skeleton {
+  background-image: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 50%, transparent 100%);
+}

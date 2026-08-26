@@ -336,6 +336,83 @@ def mode() -> dict:
 # ---------------------------------------------------------------------------
 
 
+class FirmGspStatus(BaseModel):
+    total_gstins: int
+    connected: int
+    reconnect_needed: int
+    not_connected: int
+    # For the onboarding step badge: "done" iff at least one GSTIN has a live session.
+    any_connected: bool
+    # Label pre-formatted for the sidebar sub-line, so the frontend doesn't
+    # have to re-implement the copy logic in every view.
+    summary_label: str
+
+
+@router.get("/firm-status", response_model=FirmGspStatus)
+def firm_gsp_status(
+    user: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> FirmGspStatus:
+    """Aggregate GSP connection status across every GSTIN in the firm.
+
+    Onboarding step 3 uses this to flip its badge from pending → done as
+    soon as any GSTIN has a live session. Also usable by the /v2/status
+    page and the sidebar for at-a-glance connection health.
+    """
+    rows = session.execute(
+        text(
+            """
+            SELECT
+              gp.id AS gstin_profile_id,
+              CASE
+                WHEN live.id IS NOT NULL THEN 'connected'
+                WHEN rev.id IS NOT NULL THEN 'reconnect_needed'
+                ELSE 'not_connected'
+              END AS state
+            FROM gstin_profile gp
+            LEFT JOIN LATERAL (
+              SELECT id FROM gsp_session
+              WHERE gstin_profile_id = gp.id AND revoked_at IS NULL
+              LIMIT 1
+            ) live ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT id FROM gsp_session
+              WHERE gstin_profile_id = gp.id AND revoked_at IS NOT NULL
+              LIMIT 1
+            ) rev ON TRUE
+            """
+        )
+    ).mappings().all()
+
+    connected = sum(1 for r in rows if r["state"] == "connected")
+    reconnect_needed = sum(1 for r in rows if r["state"] == "reconnect_needed")
+    not_connected = sum(1 for r in rows if r["state"] == "not_connected")
+    total = len(rows)
+
+    if total == 0:
+        label = "No GSTINs added yet"
+    elif connected == total:
+        label = f"All {total} GSTIN{'' if total == 1 else 's'} connected"
+    elif connected == 0 and reconnect_needed == 0:
+        label = f"0 of {total} GSTIN{'' if total == 1 else 's'} connected"
+    else:
+        parts = [f"{connected} connected"]
+        if reconnect_needed:
+            parts.append(f"{reconnect_needed} need reconnect")
+        if not_connected:
+            parts.append(f"{not_connected} not connected")
+        label = " · ".join(parts)
+
+    return FirmGspStatus(
+        total_gstins=total,
+        connected=connected,
+        reconnect_needed=reconnect_needed,
+        not_connected=not_connected,
+        any_connected=connected > 0,
+        summary_label=label,
+    )
+
+
 @router.get("/connection/{gstin_profile_id}", response_model=ConnectionStatus)
 def connection_status(
     gstin_profile_id: uuid.UUID,

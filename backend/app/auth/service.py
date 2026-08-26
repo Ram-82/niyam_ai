@@ -132,6 +132,35 @@ def register_from_invite(invite_token: str, password: str) -> AppUser:
         session.add(user)
         session.flush()
 
+        # Phase 2 — every authenticated user needs a live
+        # user_firm_membership row. For a fresh invite acceptance, that
+        # is a 1:1 membership matching the invite's firm + role. Uses
+        # a raw INSERT so a future partner-in-multiple-firms flow that
+        # accepts an invite while already a member somewhere composes
+        # without a schema hoop.
+        from sqlalchemy import text as _sql_text
+        session.execute(
+            _sql_text(
+                """
+                INSERT INTO user_firm_membership (
+                    user_id, firm_id, role, status, invited_by
+                ) VALUES (
+                    :uid, :fid, :role, 'active', :inviter
+                )
+                ON CONFLICT (user_id, firm_id) DO NOTHING
+                """
+            ),
+            {
+                "uid": user.id,
+                "fid": firm_id,
+                "role": role,
+                # invited_by from user_invite would be nice, but the
+                # column is on user_invite not this row; a follow-up
+                # can wire it through if the audit trail needs it.
+                "inviter": None,
+            },
+        )
+
         # Mark the invite accepted. This runs through RLS too — the invite's
         # firm_id equals the pinned GUC so the UPDATE is permitted.
         session.execute(

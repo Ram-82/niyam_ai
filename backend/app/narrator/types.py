@@ -12,7 +12,7 @@ must build a fresh facts object from a fresh snapshot.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Optional, Protocol
 
 
 Language = Literal["en", "hi", "kn", "mr"]
@@ -77,6 +77,23 @@ class NarrationFacts:
 
 
 @dataclass(frozen=True)
+class TokenUsage:
+    """Per-call token counts extracted from the LLM response.
+
+    All fields default to None so the mock adapter (which does not
+    make an API call) can construct a ``TokenUsage()`` without lying
+    about zero-usage — NULL in the log table means "no LLM was
+    called", while 0 would mean "LLM was called and reported 0",
+    which would be a bug.
+    """
+
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    cache_read_input_tokens: Optional[int] = None
+    cache_creation_input_tokens: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class NarrationOutput:
     """The four prose blocks the template engine slots into the 2-pager.
 
@@ -90,6 +107,10 @@ class NarrationOutput:
     ``provider`` + ``model`` + ``language`` are attribution metadata
     stored alongside the narration in ``narration_run`` so a later CA
     edit can see what the machine originally said.
+
+    ``usage`` is populated by the adapter and read by the service to
+    write ``narrator_call_log``. Never surfaced to the CA — internal
+    cost meter only.
     """
 
     page1_health: str
@@ -99,6 +120,7 @@ class NarrationOutput:
     provider: str
     model: str
     language: str
+    usage: TokenUsage = field(default_factory=TokenUsage)
 
 
 class NarratorError(RuntimeError):
@@ -107,6 +129,26 @@ class NarratorError(RuntimeError):
 
 class NarratorDisabled(NarratorError):
     """Feature flag off. Callers should treat like the old stub."""
+
+
+class NarratorBudgetExhausted(NarratorDisabled):
+    """Per-firm monthly cost ceiling reached.
+
+    Subclass of :class:`NarratorDisabled` so existing 503 handlers
+    keep working. Callers that want to render a more specific message
+    ("budget exhausted — contact your admin") can catch this class.
+
+    Never silently degrade to a cheaper model — spec P3_BUILD_PROMPT
+    §3.1.4 forbids it. Raise from the pre-call check.
+    """
+
+    def __init__(self, *, used_paise: int, budget_paise: int) -> None:
+        super().__init__(
+            f"narrator monthly budget exhausted: "
+            f"used {used_paise} paise of {budget_paise}"
+        )
+        self.used_paise = used_paise
+        self.budget_paise = budget_paise
 
 
 class NumberHallucination(NarratorError):

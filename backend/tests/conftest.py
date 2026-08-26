@@ -16,6 +16,29 @@ import os
 import uuid
 from typing import Iterator
 
+# ---------------------------------------------------------------------------
+# Env guards — must run BEFORE any `from app.config import settings` (or
+# `import app.gsp.crypto`) is triggered by test collection.
+#
+# Rationale:
+#   1. The developer's ``.env`` may set ``GSP_MODE=whitebooks`` (or another
+#      live-mode value) for staging probes. Tests should NEVER call a
+#      real vendor — force ``GSP_MODE=mock`` so
+#      (a) sandbox_mode flags read True as the suite expects, and
+#      (b) ``app.gsp.crypto`` uses the dev default key path.
+#   2. The dev default key path only kicks in when ``GSP_ENCRYPTION_KEYS``
+#      is empty; if the developer set it in ``.env`` (harmless in prod,
+#      contradictory in tests) inject the deterministic dev key so
+#      encryption is reproducible in the test session.
+#
+# pydantic-settings priority order is: init args > env vars > .env file >
+# defaults. So ``os.environ`` writes here override anything the developer
+# put in ``.env``.
+os.environ["GSP_MODE"] = "mock"
+os.environ["GSP_ENCRYPTION_KEYS"] = (
+    "1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+)
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -34,10 +57,15 @@ TRUNCATE_ORDER = (
     "b2b_entry",
     "gstn_pull",
     "validation_flag",
+    "ocr_extraction",
     "invoice",
     "narration_run",
+    "narrator_call_log",
     "readiness_snapshot",
     "consent_log",
+    "legal_acceptance",
+    "erasure_request",
+    "subject_key",
     "audit_log",
     "import_job",
     "gsp_pull_attempt",
@@ -46,6 +74,7 @@ TRUNCATE_ORDER = (
     "client_assignment",
     "gstin_profile",
     "user_invite",
+    "user_firm_membership",
     "app_user",
     "client",
     "ca_firm",
@@ -119,13 +148,31 @@ def _ensure_rule_pack_seed(_ensure_schema_at_head) -> None:
 
 @pytest.fixture(autouse=True)
 def clean_db() -> Iterator[None]:
-    """Truncate all tenant tables between tests, as the owner (bypasses RLS)."""
-    # Truncate as owner. rule_pack is included because some engine tests
-    # write rule packs; RLS tests do not depend on it.
+    """Truncate all tenant tables between tests, as the owner (bypasses RLS).
+
+    Re-seeds ``rule_pack`` after every truncate. ``ca_firm`` is truncated
+    CASCADE, and migration 0016 added ``rule_pack.firm_id → ca_firm``, so
+    the cascade wipes rule_pack even though it is not in TRUNCATE_ORDER.
+    Without the re-seed, every test after the first would fail with
+    ``NoActiveRulePackError`` (the session-scoped ``_ensure_rule_pack_seed``
+    only runs once at session start).
+    """
+    import json
+    from app.rules.default_pack import PAYLOAD, VERSION
+
     with owner_engine.begin() as conn:
         for t in TRUNCATE_ORDER:
             # Owner has SUPERUSER: can TRUNCATE even append-only tables.
             conn.execute(text(f"TRUNCATE TABLE {t} RESTART IDENTITY CASCADE"))
+        conn.execute(
+            text(
+                "INSERT INTO rule_pack (version, payload, active, notes) "
+                "VALUES (:v, CAST(:p AS JSONB), TRUE, 'ensured by conftest') "
+                "ON CONFLICT (version) DO UPDATE "
+                "SET payload = EXCLUDED.payload, active = TRUE"
+            ),
+            {"v": VERSION, "p": json.dumps(PAYLOAD)},
+        )
     yield
 
 
@@ -196,6 +243,7 @@ def bootstrap_firm():
         firm_name: str = "Test Firm",
         admin_email: str = "admin@example.com",
         admin_password: str = "Correct-Horse-Battery-Staple-42",
+        accept_legal: bool = True,
     ) -> dict:
         firm_id = uuid.uuid4()
         user_id = uuid.uuid4()
@@ -226,6 +274,47 @@ def bootstrap_firm():
                     "ts": secret,
                 },
             )
+            # Phase 2: every authenticated user must have a live
+            # user_firm_membership row. bootstrap_firm's admin is 1:1
+            # with the firm, mirroring the pre-Phase-2 model.
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO user_firm_membership (
+                        user_id, firm_id, role, status
+                    ) VALUES (
+                        :uid, :fid, 'admin', 'active'
+                    )
+                    ON CONFLICT (user_id, firm_id) DO NOTHING
+                    """
+                ),
+                {"uid": user_id, "fid": firm_id},
+            )
+            if accept_legal:
+                # An onboarded firm has accepted every required legal doc at
+                # its current hash. Tests that specifically exercise the
+                # acceptance gate pass ``accept_legal=False``.
+                from app.legal.documents import current_by_type
+                for doc in current_by_type().values():
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO legal_acceptance (
+                                firm_id, user_id, doc_type, doc_version,
+                                content_hash
+                            ) VALUES (
+                                :fid, :uid, :dt, :ver, :h
+                            )
+                            """
+                        ),
+                        {
+                            "fid": firm_id,
+                            "uid": user_id,
+                            "dt": doc.doc_type,
+                            "ver": doc.version,
+                            "h": doc.content_hash,
+                        },
+                    )
         created.append((str(firm_id), str(user_id)))
         return {
             "firm_id": firm_id,

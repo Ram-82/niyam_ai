@@ -16,11 +16,30 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.observability import metrics
 from app.observability.context import request_id_ctx
 
 
 _HEADER = "X-Request-Id"
 _log = logging.getLogger("niyam.request")
+
+
+def _matched_route(request: Request) -> str:
+    """Return the matched route template (``/clients/{id}``) or a
+    coarse bucket if unmatched.
+
+    Using the raw URL as a Prometheus label is the classic cardinality
+    trap — one label value per client id blows up the series count.
+    FastAPI stores the matched route object in ``request.scope["route"]``
+    once routing has run; we read ``.path`` off it.
+
+    Unmatched requests (404 before routing, /docs, /openapi.json) are
+    bucketed as ``__other__`` so the label set stays bounded.
+    """
+    route = request.scope.get("route")
+    if route is not None and hasattr(route, "path"):
+        return route.path
+    return "__other__"
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
@@ -35,14 +54,27 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             response.headers[_HEADER] = rid
             return response
         finally:
-            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            elapsed = time.perf_counter() - start
+            route = _matched_route(request)
+            # Prometheus: increment request counter + observe latency
+            # histogram. String status label so a future 3-digit code
+            # (e.g. 421) does not need a schema change.
+            metrics.http_requests_total.labels(
+                method=request.method,
+                route=route,
+                status=str(status_code),
+            ).inc()
+            metrics.http_request_duration_seconds.labels(
+                method=request.method,
+                route=route,
+            ).observe(elapsed)
             _log.info(
                 "request",
                 extra={
                     "method": request.method,
                     "path": request.url.path,
                     "status": status_code,
-                    "duration_ms": elapsed_ms,
+                    "duration_ms": int(elapsed * 1000),
                 },
             )
             request_id_ctx.reset(token)

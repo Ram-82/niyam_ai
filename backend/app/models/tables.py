@@ -31,7 +31,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import CITEXT, JSONB, UUID
+from sqlalchemy.dialects.postgresql import CITEXT, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
@@ -79,6 +79,22 @@ class CAFirm(Base):
     # not to.
     reminders_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="true"
+    )
+    # Per-firm opt-in for LLM narration. Only meaningful when the global
+    # settings.narrator_enabled is also true (which acts as an operator
+    # kill switch). Default FALSE (opt-in) because narration costs real
+    # Anthropic tokens per firm — the CA must review prose quality on
+    # their own data before letting it reach clients.
+    narrator_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    # NULL = no budget ceiling (the pre-Phase-1.4 default). When set,
+    # the narrator sums cost_paise on narrator_call_log for the current
+    # calendar month and raises NarratorBudgetExhausted before making a
+    # priced call that would cross this ceiling. Cheaper-model silent
+    # fallback is disallowed by policy — see P3_BUILD_PROMPT §3.1.4.
+    monthly_narrator_budget_paise: Mapped[Optional[int]] = mapped_column(
+        BigInteger, nullable=True
     )
     created_at: Mapped[datetime] = _created_at()
 
@@ -945,5 +961,111 @@ class FilingRun(Base):
         UniqueConstraint(
             "gstin_profile_id", "period", "return_type",
             name="filing_run_gid_period_return_uniq",
+        ),
+    )
+
+
+class OcrExtraction(Base):
+    """Persisted draft extraction produced by the OCR pipeline (migration 0018).
+
+    Mutable — Step 4 (accept/reject) transitions ``status`` and stamps
+    ``invoice_id`` back once a CA approves. Step 2 only writes rows
+    with the default status ``draft``. The niyam_app role is granted
+    SELECT + INSERT (no UPDATE) until Step 4 lands, so the row is
+    effectively immutable in Step 2.
+    """
+
+    __tablename__ = "ocr_extraction"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    firm_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ca_firm.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    gstin_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("gstin_profile.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    direction: Mapped[str] = mapped_column(Text, nullable=False)
+    source_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    source_content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    source_bytes_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    adapter: Mapped[str] = mapped_column(Text, nullable=False)
+    adapter_version: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_extraction: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    overall_confidence: Mapped[Decimal] = mapped_column(
+        Numeric(4, 3), nullable=False
+    )
+    warnings: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+    edited_extraction: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="draft"
+    )
+    invoice_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoice.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = _created_at()
+    decided_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    decided_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft','accepted','rejected')",
+            name="ocr_extraction_status_ok",
+        ),
+        CheckConstraint(
+            "direction IN ('purchase','sale')",
+            name="ocr_extraction_direction_ok",
+        ),
+        CheckConstraint(
+            "overall_confidence BETWEEN 0.000 AND 1.000",
+            name="ocr_extraction_confidence_range",
+        ),
+    )
+
+
+class LegalAcceptance(Base):
+    """APPEND ONLY. One row per firm/user acceptance of a versioned doc."""
+    __tablename__ = "legal_acceptance"
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    firm_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ca_firm.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("app_user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    doc_type: Mapped[str] = mapped_column(Text, nullable=False)
+    doc_version: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    ip_address: Mapped[Optional[str]] = mapped_column(INET, nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    __table_args__ = (
+        CheckConstraint(
+            "length(content_hash) = 64",
+            name="legal_acceptance_hash_len",
         ),
     )

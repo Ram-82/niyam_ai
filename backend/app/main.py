@@ -26,8 +26,11 @@ from app.api.firm import router as firm_router
 from app.api.gsp import router as gsp_router
 from app.api.imports import router as imports_router
 from app.api.invites import router as invites_router
+from app.api.legal import router as legal_router
 from app.api.narrator import router as narrator_router
+from app.api.ocr import router as ocr_router
 from app.api.reminders import router as reminders_router
+from app.api.reports import router as reports_router
 from app.api.rule_packs import router as rule_packs_router
 from app.api.supplier_contacts import router as supplier_contacts_router
 from app.api.whatsapp import router as whatsapp_router
@@ -47,7 +50,14 @@ async def _lifespan(app: FastAPI):
         conn.execute(text("SELECT 1"))
     # Ping Redis.
     _redis.ping()
-    log.info("niyam.startup: postgres + redis reachable")
+    # KEK for the erasure mechanism must be present outside mock mode.
+    # Fails LOUD here rather than at first key allocation, which could
+    # otherwise leave a healthy-looking service that silently falls back
+    # to the dev KEK for real subject keys.
+    from app.erasure.keys import assert_kek_available
+
+    assert_kek_available()
+    log.info("niyam.startup: postgres + redis reachable; erasure KEK present")
     yield
 
 
@@ -90,14 +100,39 @@ app.include_router(workspace_router)
 app.include_router(admin_router)
 app.include_router(gsp_router)
 app.include_router(narrator_router)
+app.include_router(ocr_router)
 app.include_router(whatsapp_router)
 app.include_router(supplier_contacts_router)
 app.include_router(filings_router)
 app.include_router(audit_router)
 app.include_router(reminders_router)
+app.include_router(reports_router)
 app.include_router(rule_packs_router)
 app.include_router(calendar_router)
 app.include_router(firm_router)
+app.include_router(legal_router)
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    """Prometheus scrape endpoint (Phase 1.6).
+
+    Exposes the default process registry — HTTP request counters,
+    latency histogram, narrator cost/call counters, GSP outcomes,
+    auth failures + lockouts. See ``app/observability/metrics.py``
+    for the full metric list.
+
+    Deliberately un-authenticated; a prod deploy fronts /metrics with
+    the ingress ACL (Cloud Run internal, Supabase Edge Function
+    protection, or a reverse-proxy allowlist) rather than an app-level
+    token — the scrape identity is the network, not a user.
+    """
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
 
 
 @app.get("/health")

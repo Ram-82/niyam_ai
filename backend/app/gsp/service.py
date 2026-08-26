@@ -72,11 +72,36 @@ from app.ingestion.writer import bulk_insert_b2b_entries, insert_gstn_pull
 def get_adapter() -> GSPClient:
     """Return the adapter for the current ``GSP_MODE``.
 
-    Only 'mock' is wired today. Adding a real vendor is a single elif
-    branch — see README §Swapping in a real GSP vendor.
+    'mock'       → local ``MockGSPServer`` for dev/e2e.
+    'live'       → generic X-Api-Key adapter (Master GST shape).
+                   Requires ``GSP_API_KEY``.
+    'whitebooks' → WhiteBooks (BVM IT) adapter. Requires the
+                   six-value config set (see ``Settings._check_secrets``).
     """
     if settings.gsp_mode == "mock":
         return MockGSPAdapter(base_url=settings.gsp_base_url)
+    if settings.gsp_mode == "live":
+        # Late import so mock-mode deploys don't pay the module load.
+        from app.gsp.adapter_live import LiveGSPAdapter
+
+        return LiveGSPAdapter(
+            base_url=settings.gsp_base_url,
+            api_key=settings.gsp_api_key,
+            path_prefix=settings.gsp_live_path_prefix,
+            client_id=settings.gsp_client_id,
+            client_secret=settings.gsp_client_secret,
+        )
+    if settings.gsp_mode == "whitebooks":
+        from app.gsp.adapter_whitebooks import WhiteBooksGSPAdapter
+
+        return WhiteBooksGSPAdapter(
+            base_url=settings.gsp_base_url,
+            client_id=settings.gsp_client_id,
+            client_secret=settings.gsp_client_secret,
+            gst_username=settings.gsp_gst_username,
+            ip_address=settings.gsp_ip_address,
+            developer_email=settings.gsp_developer_email,
+        )
     raise RuntimeError(
         f"GSP_MODE={settings.gsp_mode!r} has no adapter wired. "
         "Add one in app/gsp/service.py::get_adapter."
@@ -206,6 +231,13 @@ def _log_call(
             "ms": int((time.time() - started_at) * 1000),
         },
     )
+    # Prometheus counter (Phase 1.6). Outcome bucket == error_kind
+    # when set (so 'auth_error', 'rate_limited', etc. map 1:1 to log
+    # rows); 'success' when succeeded.
+    from app.observability import metrics
+
+    outcome = "success" if succeeded else (error_kind or "error")
+    metrics.gsp_pull_total.labels(outcome=outcome).inc()
 
 
 # ---------------------------------------------------------------------------

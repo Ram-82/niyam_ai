@@ -50,13 +50,22 @@ def record_failure(email: str) -> int:
     On the MAX_ATTEMPTS-th failure, set the ``locked_until`` marker. Both
     keys share the same TTL — after the window they roll off together.
     """
+    from app.observability import metrics
+
     key = _attempts_key(email)
     # INCR + EXPIRE on first hit. Redis auto-creates the key at value 1.
     count = int(_redis.incr(key))
     if count == 1:
         _redis.expire(key, WINDOW_SECONDS)
+    metrics.auth_failures_total.labels(reason="login").inc()
     if count >= MAX_ATTEMPTS:
+        # Only transition-into-locked increments the lockout counter;
+        # subsequent failures inside the window keep the marker but
+        # do NOT double-count the transition.
+        was_locked = _redis.exists(_locked_key(email)) == 1
         _redis.set(_locked_key(email), "1", ex=WINDOW_SECONDS)
+        if not was_locked:
+            metrics.auth_lockouts_total.inc()
     return count
 
 
