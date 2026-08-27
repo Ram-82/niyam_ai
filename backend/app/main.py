@@ -37,6 +37,7 @@ from app.api.whatsapp import router as whatsapp_router
 from app.api.workspace import router as workspace_router
 from app.auth.revocation import _redis
 from app.db import app_engine
+from app.erasure.keys import assert_kek_available
 
 
 log = logging.getLogger("niyam.main")
@@ -44,6 +45,12 @@ log = logging.getLogger("niyam.main")
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    # KEK guard — refuse to boot when ERASURE_KEK_KEYS is missing or malformed
+    # in non-mock mode. A silent fallback to the dev KEK would produce
+    # subject_key rows whose ciphertext is decryptable by anyone with the
+    # source tree, which is the entire failure mode this file exists to
+    # prevent. Mock/test mode is explicitly allowed to fall back.
+    assert_kek_available()
     # Ping Postgres via the app engine (SET ROLE runs, so failures here
     # surface a real config problem, not just "database is up").
     with app_engine.connect() as conn:
