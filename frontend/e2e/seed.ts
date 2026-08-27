@@ -4,47 +4,33 @@
  * one GSTIN profile, invoices + 2B + validation + reconciliation +
  * score already computed.
  *
- * Uses the same HTTP surface a real CA would use — no shortcut to
- * ownership of DB primitives. That way the smoke also tests the API.
+ * Firm/user/client/GSTIN/legal-acceptance come from the shared
+ * ``bootstrapFirm`` helper. Everything else — the invoice/b2b/gstn_pull
+ * scenario the smoke asserts on, plus the engines/validate ·
+ * engines/reconcile · engines/score triggers — is smoke-specific and
+ * stays here.
  */
-import { authenticator } from "otplib";
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+
+import { bootstrapFirm } from "./bootstrap";
 
 
 const API = process.env.NIYAM_API_BASE || "http://localhost:8000";
-// Repo root — docker compose commands must run from where the compose
-// file lives. Playwright is invoked from ``frontend/``, so cwd = frontend
-// and the parent is the repo root. Using process.cwd() keeps this
-// CommonJS-compatible; Playwright's TypeScript transformer compiles to
-// CJS by default and ``import.meta.url`` is not available there.
 const REPO_ROOT = resolve(process.cwd(), "..");
 
 
-/**
- * Run a Python script inside the ``backend`` compose service.
- *
- * We pipe the source via stdin (``python -``) instead of ``-c "…"``:
- * shell double-quoted strings preserve backslashes literally, so any
- * newline in the source arrives at Python as a literal ``\n`` which is
- * a syntax error. Piping avoids the shell entirely.
- */
 function runInBackend(script: string): string {
   const result = spawnSync(
     "docker",
     ["compose", "run", "--rm", "-T", "backend", "python", "-"],
-    {
-      input: script,
-      cwd: REPO_ROOT,
-      encoding: "utf-8",
-    }
+    { input: script, cwd: REPO_ROOT, encoding: "utf-8" },
   );
   if (result.status !== 0) {
     throw new Error(
       `runInBackend failed (status=${result.status})\n` +
       `--- stdout ---\n${result.stdout}\n` +
-      `--- stderr ---\n${result.stderr}`
+      `--- stderr ---\n${result.stderr}`,
     );
   }
   return result.stdout;
@@ -61,100 +47,13 @@ export type Seed = {
 };
 
 
-/**
- * Bootstrap a firm + admin directly in Postgres via the backend
- * container's shell. We use exec because the API can't create the
- * first firm — that's a chicken-and-egg (there's no admin yet to
- * authenticate the CREATE FIRM call). Real deployment path is a
- * one-off Python script; Playwright uses the same idea inline.
- */
 export async function seedFirmAndData(): Promise<Seed> {
-  const email = `smoke-${randomUUID()}@example.com`;
-  const password = "Correct-Horse-Battery-Staple-42";
-  const script = `
-import os, uuid, secrets, pyotp, base64
-from sqlalchemy import create_engine, text
-from app.auth.passwords import hash_password
-from app.legal.documents import current_by_type
-
-engine = create_engine("postgresql+psycopg://niyam:niyam@postgres:5432/niyam")
-firm_id = uuid.uuid4()
-user_id = uuid.uuid4()
-secret = pyotp.random_base32()
-
-with engine.begin() as conn:
-    conn.execute(text("INSERT INTO ca_firm (id, name) VALUES (:id, 'SmokeCo')"), {"id": firm_id})
-    conn.execute(
-        text("""
-            INSERT INTO app_user (
-                id, firm_id, email, password_hash, role,
-                totp_secret, totp_confirmed, is_active
-            ) VALUES (
-                :id, :fid, :email, :ph, 'admin',
-                :ts, TRUE, TRUE
-            )
-        """),
-        {"id": user_id, "fid": firm_id, "email": ${JSON.stringify(email)},
-         "ph": hash_password(${JSON.stringify(password)}), "ts": secret},
-    )
-    # Pre-accept every required legal document so subsequent API calls
-    # (POST /clients, POST /gsp/pull, etc.) are not blocked by
-    # require_legal_accepted. The P4 Phase D interceptor will make this
-    # user-facing; the e2e seed short-circuits it.
-    for doc in current_by_type().values():
-        conn.execute(
-            text("""
-                INSERT INTO legal_acceptance (
-                    firm_id, user_id, doc_type, doc_version, content_hash
-                ) VALUES (
-                    :fid, :uid, :dt, :ver, :h
-                )
-            """),
-            {"fid": firm_id, "uid": user_id,
-             "dt": doc.doc_type, "ver": doc.version, "h": doc.content_hash},
-        )
-
-print(f"{firm_id}|{user_id}|{secret}")
-`;
-  const raw = runInBackend(script);
-  const line = raw.trim().split(/\r?\n/).pop() || "";
-  const [firmId, , totpSecret] = line.split("|");
-
-  // Login via the API so downstream calls use a real access token.
-  const totpCode = authenticator.generate(totpSecret);
-  const loginRes = await fetch(`${API}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, totp_code: totpCode }),
+  const boot = await bootstrapFirm({
+    firmName: "SmokeCo",
+    emailPrefix: "smoke",
+    clientTradeName: "SmokeClient",
   });
-  const login = await loginRes.json();
-  const token = login.access_token;
-
-  // Create a client + gstin_profile via API.
-  const clientRes = await fetch(`${API}/clients`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ trade_name: "SmokeClient" }),
-  });
-  const client = await clientRes.json();
-
-  const gstin = "29AAAAA0000A1ZY";  // pre-verified checksum for tests
-  const gRes = await fetch(`${API}/clients/${client.id}/gstins`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      gstin,
-      state_code: "29",
-      scheme: "regular",
-    }),
-  });
-  const gstinProfile = await gRes.json();
+  const { firmId, gstinProfileId, email, password, totpSecret, token } = boot;
 
   // Seed a scenario that produces one row in EVERY reconciliation
   // bucket the smoke needs to assert on:
@@ -187,9 +86,6 @@ print(f"{firm_id}|{user_id}|{secret}")
   )
     .toString()
     .padStart(2, "0")}`;
-  // Invoice dates live INSIDE the reconciliation period — the recon
-  // engine scopes invoices by month. Two dates: mid-month for the
-  // matched/near-miss cases, mid+2 for the probable/missing-entry.
   const yyyyMm = `${period.slice(0, 4)}-${period.slice(4, 6)}`;
   const midDate = `${yyyyMm}-15`;
   const midPlus2 = `${yyyyMm}-17`;
@@ -202,20 +98,17 @@ from datetime import date
 from sqlalchemy import create_engine, text
 engine = create_engine("postgresql+psycopg://niyam:niyam@postgres:5432/niyam")
 firm_id = "${firmId}"
-gid = "${gstinProfile.id}"
+gid = "${gstinProfileId}"
 supA = "${supA}"
 supB = "${supB}"
 pull_id = str(uuid.uuid4())
 with engine.begin() as c:
     for num, dt, cp, total in [
-        ("M-1",  "${midDate}", supA, 100000),   # -> matched
-        ("P-1",  "${midDate}", supA, 200000),   # -> probable via P/1
-        ("SD-A", "${midDate}", supA, 400000),   # -> supplier_default WITH near-miss
-        ("SD-B", "${midDate}", supB, 500000),   # -> supplier_default WITHOUT near-miss
+        ("M-1",  "${midDate}", supA, 100000),
+        ("P-1",  "${midDate}", supA, 200000),
+        ("SD-A", "${midDate}", supA, 400000),
+        ("SD-B", "${midDate}", supB, 500000),
     ]:
-        # content_hash computed in Python so we pass ONE unambiguous
-        # text param (Postgres refuses to type-infer CONCAT of two
-        # otherwise-untyped params).
         content_hash = f"h-{num}-{dt}"
         c.execute(text("""
             INSERT INTO invoice (
@@ -233,10 +126,10 @@ with engine.begin() as c:
         VALUES (:id, :f, :g, 'GSTR2B', '${period}', CAST('{}' AS JSONB), 'json_import')
     """), {"id": pull_id, "f": firm_id, "g": gid})
     for num, dt, sup, tx in [
-        ("M-1",     "${midDate}",  supA, 100000),   # exact match to register M-1
-        ("P/1",     "${midPlus2}", supA, 200200),   # probable match to register P-1
-        ("SD-A",    "${midDate}",  supA, 999000),   # near-miss for register SD-A
-        ("GHOST-1", "${midPlus5}", supA,   5000),   # missing_entry
+        ("M-1",     "${midDate}",  supA, 100000),
+        ("P/1",     "${midPlus2}", supA, 200200),
+        ("SD-A",    "${midDate}",  supA, 999000),
+        ("GHOST-1", "${midPlus5}", supA,   5000),
     ]:
         c.execute(text("""
             INSERT INTO b2b_entry (firm_id, gstn_pull_id, supplier_gstin,
@@ -249,9 +142,9 @@ with engine.begin() as c:
 
   // Trigger validate → reconcile → score via API.
   for (const [path, body] of [
-    ["/engines/validate", { gstin_profile_id: gstinProfile.id, period }],
-    ["/engines/reconcile", { gstin_profile_id: gstinProfile.id, period }],
-    ["/engines/score", { gstin_profile_id: gstinProfile.id, return_type: "GSTR1", period }],
+    ["/engines/validate", { gstin_profile_id: gstinProfileId, period }],
+    ["/engines/reconcile", { gstin_profile_id: gstinProfileId, period }],
+    ["/engines/score", { gstin_profile_id: gstinProfileId, return_type: "GSTR1", period }],
   ] as const) {
     const r = await fetch(`${API}${path}`, {
       method: "POST",
@@ -268,7 +161,7 @@ with engine.begin() as c:
 
   return {
     firmId,
-    gstinProfileId: gstinProfile.id,
+    gstinProfileId,
     period,
     email,
     password,

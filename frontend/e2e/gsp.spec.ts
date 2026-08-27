@@ -11,32 +11,14 @@
  * fixtures for the primary GSTIN 29ZZZZZ9999Z9Z9; we seed that GSTIN.
  */
 import { test, expect } from "@playwright/test";
-import { authenticator } from "otplib";
-import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+
+import { bootstrapFirm } from "./bootstrap";
 
 
 const API = process.env.NIYAM_API_BASE || "http://localhost:8000";
-const REPO_ROOT = resolve(process.cwd(), "..");
 // The primary fixture GSTIN. app/gsp/fixtures/gstr2b_<gstin>_<period>.json.
 const CLIENT_GSTIN = "29ZZZZZ9999Z9Z9";
 const MOCK_OTP = "123456";
-
-
-function runInBackend(script: string): string {
-  const r = spawnSync(
-    "docker",
-    ["compose", "run", "--rm", "-T", "backend", "python", "-"],
-    { input: script, cwd: REPO_ROOT, encoding: "utf-8" }
-  );
-  if (r.status !== 0) {
-    throw new Error(
-      `runInBackend failed: ${r.status}\n--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}`
-    );
-  }
-  return r.stdout;
-}
 
 
 type Ctx = {
@@ -50,50 +32,20 @@ type Ctx = {
 
 
 async function seedFirmAndConnect(): Promise<Ctx> {
-  const email = `gsp-${randomUUID()}@example.com`;
-  const password = "Correct-Horse-Battery-Staple-42";
-  const seed = `
-import uuid, pyotp
-from sqlalchemy import create_engine, text
-from app.auth.passwords import hash_password
-engine = create_engine("postgresql+psycopg://niyam:niyam@postgres:5432/niyam")
-firm_id = uuid.uuid4()
-user_id = uuid.uuid4()
-client_id = uuid.uuid4()
-gstin_id = uuid.uuid4()
-secret = pyotp.random_base32()
-with engine.begin() as c:
-    c.execute(text("INSERT INTO ca_firm (id, name) VALUES (:i, 'GspCo')"), {"i": firm_id})
-    c.execute(text(
-        "INSERT INTO app_user (id, firm_id, email, password_hash, role, "
-        "totp_secret, totp_confirmed, is_active) VALUES "
-        "(:i, :f, :e, :ph, 'admin', :ts, TRUE, TRUE)"),
-        {"i": user_id, "f": firm_id, "e": ${JSON.stringify(email)},
-         "ph": hash_password(${JSON.stringify(password)}), "ts": secret})
-    c.execute(text(
-        "INSERT INTO client (id, firm_id, trade_name) VALUES (:c, :f, 'Sandbox Client')"),
-        {"c": client_id, "f": firm_id})
-    c.execute(text(
-        "INSERT INTO gstin_profile (id, firm_id, client_id, gstin, state_code) "
-        "VALUES (:g, :f, :c, :gstin, '29')"),
-        {"g": gstin_id, "f": firm_id, "c": client_id, "gstin": ${JSON.stringify(CLIENT_GSTIN)}})
-print(f"{firm_id}|{user_id}|{secret}|{gstin_id}")
-`;
-  const raw = runInBackend(seed).trim();
-  const line = raw.split(/\r?\n/).pop() || "";
-  const [firmId, , totpSecret, gstinProfileId] = line.split("|");
-
-  const totpCode = authenticator.generate(totpSecret);
-  const loginRes = await fetch(`${API}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, totp_code: totpCode }),
+  const boot = await bootstrapFirm({
+    firmName: "GspCo",
+    emailPrefix: "gsp",
+    clientTradeName: "Sandbox Client",
+    gstin: CLIENT_GSTIN,
   });
-  if (!loginRes.ok) {
-    throw new Error(`login failed: ${loginRes.status} ${await loginRes.text()}`);
-  }
-  const { access_token: token } = await loginRes.json();
-  return { firmId, gstinProfileId, email, password, totpSecret, token };
+  return {
+    firmId: boot.firmId,
+    gstinProfileId: boot.gstinProfileId,
+    email: boot.email,
+    password: boot.password,
+    totpSecret: boot.totpSecret,
+    token: boot.token,
+  };
 }
 
 

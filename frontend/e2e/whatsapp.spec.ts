@@ -13,10 +13,10 @@
  * transport (deterministic wamid.mock.NNNNNN ids). No external calls.
  */
 import { test, expect } from "@playwright/test";
-import { authenticator } from "otplib";
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+
+import { bootstrapFirm } from "./bootstrap";
 
 
 const API = process.env.NIYAM_API_BASE || "http://localhost:8000";
@@ -49,35 +49,27 @@ type Ctx = {
 
 
 async function seedFirmWithReadiness(): Promise<Ctx> {
-  const email = `wa-${randomUUID()}@example.com`;
-  const password = "Correct-Horse-Battery-Staple-42";
+  const boot = await bootstrapFirm({
+    firmName: "WaCo",
+    emailPrefix: "wa",
+    clientTradeName: "Beta Traders",
+    gstin: "29ABCDE1234F1Z5",
+  });
+  // Attach whatsapp_number + gstn_pull + reconciliation_run + readiness_snapshot.
+  // The client's whatsapp_number is an UPDATE — POST /clients accepts it but
+  // we already created the client through bootstrapFirm without one.
   const seed = `
-import json, uuid, pyotp
+import json
 from sqlalchemy import create_engine, text
-from app.auth.passwords import hash_password
 engine = create_engine("postgresql+psycopg://niyam:niyam@postgres:5432/niyam")
-firm_id = uuid.uuid4()
-user_id = uuid.uuid4()
-client_id = uuid.uuid4()
-gstin_id = uuid.uuid4()
+firm_id = "${boot.firmId}"
+client_id = "${boot.clientId}"
+gstin_id = "${boot.gstinProfileId}"
+import uuid
 pull_id = uuid.uuid4()
-secret = pyotp.random_base32()
 with engine.begin() as c:
-    c.execute(text("INSERT INTO ca_firm (id, name) VALUES (:i, 'WaCo')"), {"i": firm_id})
-    c.execute(text(
-        "INSERT INTO app_user (id, firm_id, email, password_hash, role, "
-        "totp_secret, totp_confirmed, is_active) VALUES "
-        "(:i, :f, :e, :ph, 'admin', :ts, TRUE, TRUE)"),
-        {"i": user_id, "f": firm_id, "e": ${JSON.stringify(email)},
-         "ph": hash_password(${JSON.stringify(password)}), "ts": secret})
-    c.execute(text(
-        "INSERT INTO client (id, firm_id, trade_name, whatsapp_number) "
-        "VALUES (:c, :f, 'Beta Traders', :wn)"),
-        {"c": client_id, "f": firm_id, "wn": "+919876543210"})
-    c.execute(text(
-        "INSERT INTO gstin_profile (id, firm_id, client_id, gstin, state_code) "
-        "VALUES (:g, :f, :c, '29ABCDE1234F1Z5', '29')"),
-        {"g": gstin_id, "f": firm_id, "c": client_id})
+    c.execute(text("UPDATE client SET whatsapp_number = :wn WHERE id = :c"),
+              {"c": client_id, "wn": "+919876543210"})
     # narration/facts_builder pulls from readiness_snapshot + reconciliation_run.
     c.execute(text(
         "INSERT INTO gstn_pull (id, firm_id, gstin_profile_id, return_type, period, "
@@ -106,23 +98,17 @@ with engine.begin() as c:
              "paise_impact": 4300000,
          }]),
          "a": json.dumps({"tax_paid_paise": 2500000, "tax_due_paise": 3000000})})
-print(f"{firm_id}|{user_id}|{secret}|{gstin_id}")
 `;
-  const raw = runInBackend(seed).trim();
-  const line = raw.split(/\r?\n/).pop() || "";
-  const [firmId, , totpSecret, gstinProfileId] = line.split("|");
+  runInBackend(seed);
 
-  const totpCode = authenticator.generate(totpSecret);
-  const loginRes = await fetch(`${API}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, totp_code: totpCode }),
-  });
-  if (!loginRes.ok) {
-    throw new Error(`login failed: ${loginRes.status} ${await loginRes.text()}`);
-  }
-  const { access_token: token } = await loginRes.json();
-  return { firmId, gstinProfileId, email, password, totpSecret, token };
+  return {
+    firmId: boot.firmId,
+    gstinProfileId: boot.gstinProfileId,
+    email: boot.email,
+    password: boot.password,
+    totpSecret: boot.totpSecret,
+    token: boot.token,
+  };
 }
 
 
