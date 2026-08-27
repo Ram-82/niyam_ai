@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 
 /* ---------------------------- Backend types ---------------------------- */
 
@@ -133,12 +134,7 @@ export function useDashboardData(): DashboardState {
           activity: a.status === "fulfilled" ? a.value : null,
         });
         if (firstErr) {
-          const reason = firstErr.reason;
-          if (reason instanceof ApiError) {
-            setError(`${reason.status}: ${reason.message}`);
-          } else {
-            setError(String(reason?.message ?? reason));
-          }
+          setError(formatApiError(firstErr.reason));
         }
       })
       .finally(() => {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 
 /* ---------------------------- Backend types ---------------------------- */
 
@@ -105,12 +106,7 @@ export function useOnboardingData(): OnboardingState {
         | PromiseRejectedResult
         | undefined;
       if (firstErr) {
-        const reason = firstErr.reason;
-        setError(
-          reason instanceof ApiError
-            ? `${reason.status}: ${reason.message}`
-            : String(reason?.message ?? reason),
-        );
+        setError(formatApiError(firstErr.reason));
       }
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };

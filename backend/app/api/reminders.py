@@ -62,26 +62,34 @@ def reminders_sweep(
         date.fromisoformat(today) if today else datetime.now(tz=timezone.utc).date()
     )
 
-    with owner_engine.begin() as conn:
-        got_lock = conn.execute(
-            text("SELECT pg_try_advisory_lock(:k)"),
-            {"k": _REMINDERS_LOCK_KEY},
-        ).scalar_one()
-    if not got_lock:
-        logger.warning("reminders.scheduler.skipped_concurrency_locked today=%s", day)
-        return {
-            "today": day.isoformat(),
-            "status": "skipped_concurrency_locked",
-        }
-
+    # Hold one connection across acquire+release. Same reasoning as
+    # backend/app/api/gsp.py::scheduler_run — session-scoped advisory
+    # locks + a pool with no ``pool_recycle`` mean a release on a
+    # different backend leaks the lock until process restart.
+    conn = owner_engine.connect()
     try:
-        report = sweep_reminders(day)
-    finally:
-        with owner_engine.begin() as conn:
-            conn.execute(
-                text("SELECT pg_advisory_unlock(:k)"),
+        with conn.begin():
+            got_lock = conn.execute(
+                text("SELECT pg_try_advisory_lock(:k)"),
                 {"k": _REMINDERS_LOCK_KEY},
-            )
+            ).scalar_one()
+        if not got_lock:
+            logger.warning("reminders.scheduler.skipped_concurrency_locked today=%s", day)
+            return {
+                "today": day.isoformat(),
+                "status": "skipped_concurrency_locked",
+            }
+
+        try:
+            report = sweep_reminders(day)
+        finally:
+            with conn.begin():
+                conn.execute(
+                    text("SELECT pg_advisory_unlock(:k)"),
+                    {"k": _REMINDERS_LOCK_KEY},
+                )
+    finally:
+        conn.close()
 
     return {
         "today": day.isoformat(),
