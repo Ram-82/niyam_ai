@@ -11,11 +11,32 @@
  * fixtures for the primary GSTIN 29ZZZZZ9999Z9Z9; we seed that GSTIN.
  */
 import { test, expect } from "@playwright/test";
+import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 
 import { bootstrapFirm } from "./bootstrap";
 
 
 const API = process.env.NIYAM_API_BASE || "http://localhost:8000";
+const REPO_ROOT = resolve(process.cwd(), "..");
+
+
+// Kept because the reconnect test still shells into the backend to
+// mutate ``gsp_session`` state directly. The bootstrap covers the
+// happy-path seed; failure-mode simulation stays inline.
+function runInBackend(script: string): string {
+  const r = spawnSync(
+    "docker",
+    ["compose", "run", "--rm", "-T", "backend", "python", "-"],
+    { input: script, cwd: REPO_ROOT, encoding: "utf-8" },
+  );
+  if (r.status !== 0) {
+    throw new Error(
+      `runInBackend failed: ${r.status}\n--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}`,
+    );
+  }
+  return r.stdout;
+}
 // The primary fixture GSTIN. app/gsp/fixtures/gstr2b_<gstin>_<period>.json.
 const CLIENT_GSTIN = "29ZZZZZ9999Z9Z9";
 const MOCK_OTP = "123456";
