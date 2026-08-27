@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 
 /* ---------------------------- Backend types ---------------------------- */
 
@@ -111,9 +112,7 @@ export function useAuditLog(): AuditLogState {
       })
       .catch((e: unknown) => {
         if (activeRef.current !== token) return;
-        setError(
-          e instanceof ApiError ? `${e.status}: ${e.message}` : String((e as Error)?.message ?? e),
-        );
+        setError(formatApiError(e));
         setRows([]);
         setHasMore(false);
       })
@@ -140,9 +139,7 @@ export function useAuditLog(): AuditLogState {
         setHasMore(data.length >= PAGE_SIZE);
       })
       .catch((e: unknown) => {
-        setError(
-          e instanceof ApiError ? `${e.status}: ${e.message}` : String((e as Error)?.message ?? e),
-        );
+        setError(formatApiError(e));
       })
       .finally(() => setLoadingMore(false));
   }, [filters, rows, hasMore, loadingMore]);

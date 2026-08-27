@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 
 /* ---------------------------- Backend types ---------------------------- */
 
@@ -261,7 +262,7 @@ export function useClientActivity(clientId: string | null) {
       .then((rows) => { if (!cancelled) setItems(rows); })
       .catch((e) => {
         if (cancelled) return;
-        setError(e instanceof ApiError ? `${e.status}: ${e.message}` : String(e));
+        setError(formatApiError(e));
         setItems([]);
       })
       .finally(() => { if (!cancelled) setLoading(false); });

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 
 /* ---------------------------- Backend types ---------------------------- */
 
@@ -117,9 +118,7 @@ export function useInviteMutation(onSuccess?: () => void): InviteMutation {
         setSuccess(`Invite sent to ${email}`);
         onSuccess?.();
       } catch (e) {
-        setError(
-          e instanceof ApiError ? `${e.status}: ${e.message}` : String(e),
-        );
+        setError(formatApiError(e));
       } finally {
         setRunning(false);
       }

@@ -20,16 +20,28 @@ export class ApiError extends Error {
   // Used by the UI to render a wall-clock retry time; see
   // ``lib/format-retry-after.ts`` and ``RATE_LIMIT_COPY``.
   retryAfterSeconds: number | null;
+  // ``X-Request-Id`` from the response, echoed back from
+  // ``app.observability`` middleware. Rendered on failure surfaces so a
+  // reporter can hand it back and we can find the log line.
+  requestId: string | null;
+  // Machine-readable slug when the backend returns
+  // ``{"detail": {"error": "<slug>", ...}}``. UI branches on this rather
+  // than pattern-matching on the human message.
+  code: string | null;
   constructor(
     status: number,
     message: string,
     body: unknown,
     retryAfterSeconds: number | null = null,
+    requestId: string | null = null,
+    code: string | null = null,
   ) {
     super(message);
     this.status = status;
     this.body = body;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.requestId = requestId;
+    this.code = code;
   }
 }
 
@@ -40,6 +52,53 @@ type Options = {
   authenticated?: boolean;   // default true
   headers?: Record<string, string>;
 };
+
+
+/**
+ * Normalise the backend's error shape into (code, message).
+ *
+ * The backend returns one of three shapes:
+ *   1. ``{"detail": "human string"}``            — legacy / simple cases
+ *   2. ``{"detail": {"error": "<slug>", ...}}``  — machine-readable code
+ *   3. Non-JSON text                             — 5xx unhandled, upstream, etc.
+ *
+ * For (2) we return a short, factual message keyed off the slug. Never
+ * String()-coerce a non-string detail — that's the origin of the
+ * "[object Object]" defect the UI used to show.
+ */
+function extractErrorParts(
+  parsed: unknown,
+  fallbackText: string,
+  statusText: string,
+): { code: string | null; message: string } {
+  if (parsed && typeof parsed === "object" && "detail" in (parsed as any)) {
+    const detail = (parsed as any).detail;
+    if (typeof detail === "string") {
+      return { code: null, message: detail };
+    }
+    if (detail && typeof detail === "object" && typeof detail.error === "string") {
+      return { code: detail.error, message: detail.error };
+    }
+    // Detail is a structured object without a string ``error`` — fall
+    // through to statusText rather than String()-coerce.
+    return { code: null, message: statusText || "Request failed" };
+  }
+  return {
+    code: null,
+    message: fallbackText || statusText || "Request failed",
+  };
+}
+
+
+function requestIdFrom(res: Response): string | null {
+  return res.headers.get("X-Request-Id");
+}
+
+
+function retryAfterFrom(res: Response): number | null {
+  const hdr = res.headers.get("Retry-After");
+  return hdr && /^\d+$/.test(hdr) ? Number(hdr) : null;
+}
 
 
 export async function api<T = unknown>(
@@ -76,14 +135,15 @@ export async function api<T = unknown>(
   const parsed = text ? safeJson(text) : null;
 
   if (!res.ok) {
-    const detail =
-      (parsed && typeof parsed === "object" && "detail" in (parsed as any)
-        ? String((parsed as any).detail)
-        : text) || res.statusText;
-    const retryHdr = res.headers.get("Retry-After");
-    const retryAfterSeconds =
-      retryHdr && /^\d+$/.test(retryHdr) ? Number(retryHdr) : null;
-    throw new ApiError(res.status, detail, parsed, retryAfterSeconds);
+    const { code, message } = extractErrorParts(parsed, text, res.statusText);
+    throw new ApiError(
+      res.status,
+      message,
+      parsed,
+      retryAfterFrom(res),
+      requestIdFrom(res),
+      code,
+    );
   }
   return parsed as T;
 }
@@ -109,14 +169,15 @@ export async function apiFormData<T = unknown>(
   const text = await res.text();
   const parsed = text ? safeJson(text) : null;
   if (!res.ok) {
-    const detail =
-      (parsed && typeof parsed === "object" && "detail" in (parsed as any)
-        ? String((parsed as any).detail)
-        : text) || res.statusText;
-    const retryHdr = res.headers.get("Retry-After");
-    const retryAfterSeconds =
-      retryHdr && /^\d+$/.test(retryHdr) ? Number(retryHdr) : null;
-    throw new ApiError(res.status, detail, parsed, retryAfterSeconds);
+    const { code, message } = extractErrorParts(parsed, text, res.statusText);
+    throw new ApiError(
+      res.status,
+      message,
+      parsed,
+      retryAfterFrom(res),
+      requestIdFrom(res),
+      code,
+    );
   }
   return parsed as T;
 }
@@ -149,14 +210,17 @@ export async function apiBlob(path: string): Promise<Blob> {
     clearAccessToken();
   }
   if (!res.ok) {
-    // Try to pull a JSON error body; fall back to text.
     const txt = await res.text();
     const parsed = txt ? safeJson(txt) : null;
-    const detail =
-      (parsed && typeof parsed === "object" && "detail" in (parsed as any)
-        ? String((parsed as any).detail)
-        : txt) || res.statusText;
-    throw new ApiError(res.status, detail, parsed, null);
+    const { code, message } = extractErrorParts(parsed, txt, res.statusText);
+    throw new ApiError(
+      res.status,
+      message,
+      parsed,
+      null,
+      requestIdFrom(res),
+      code,
+    );
   }
   return res.blob();
 }

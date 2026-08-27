@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { SunIcon, MoonIcon, ChevronDownIcon, ArrowUpRightIcon } from "@/components/v2/icons";
 import { api, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 import { setAccessToken } from "@/lib/auth";
 import type { LoginResponse } from "@/lib/types";
 import { RATE_LIMIT_COPY } from "@/lib/constants";
@@ -401,7 +402,7 @@ export default function SignInPage() {
       } else if (err instanceof ApiError) {
         setError(err.message || `Sign-in failed (${err.status}).`);
       } else {
-        setError(String(err));
+        setError(formatApiError(err));
       }
     } finally {
       setLoading(false);

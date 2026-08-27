@@ -25,6 +25,7 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 import { NearMissReview } from "@/components/atoms";
 import { DeliveryAttemptsList } from "@/components/DeliveryAttemptsList";
 import { NARRATION_LANGUAGE_LABELS } from "@/lib/constants";
@@ -75,7 +76,7 @@ export function SupplierChasePanel({
       onLocalUpdate?.({ near_miss_reviewed_at: body.near_miss_reviewed_at });
       setState({ kind: "reviewed" });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatApiError(e));
       setState({ kind: "idle" });
     }
   }
@@ -109,9 +110,7 @@ export function SupplierChasePanel({
             // Log via the error strip but let the modal open — the CA
             // can still send by typing the number.
             setError(
-              `Supplier directory lookup failed: ${
-                e instanceof Error ? e.message : String(e)
-              }`,
+              `Supplier directory lookup failed: ${formatApiError(e)}`,
             );
           }
         }
@@ -124,7 +123,7 @@ export function SupplierChasePanel({
         setState({ kind: "disabled" });
         return;
       }
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatApiError(e));
     }
   }
 
@@ -167,9 +166,7 @@ export function SupplierChasePanel({
             // chase send (the directory-save is a convenience, not a
             // precondition).
             setError(
-              `Saving to directory failed: ${
-                e instanceof Error ? e.message : String(e)
-              }. Proceeding with chase send.`,
+              `Saving to directory failed: ${formatApiError(e)}. Proceeding with chase send.`,
             );
           }
         }
@@ -212,7 +209,7 @@ export function SupplierChasePanel({
         }
         setError(`${e.message} (HTTP ${e.status})`);
       } else {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(formatApiError(e));
       }
     }
   }

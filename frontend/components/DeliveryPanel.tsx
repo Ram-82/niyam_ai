@@ -34,6 +34,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, apiBlob, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 import { NarrationPreview } from "@/components/NarrationPreview";
 import { DeliveryAttemptsList } from "@/components/DeliveryAttemptsList";
 import { NARRATION_LANGUAGE_LABELS } from "@/lib/constants";
@@ -100,7 +101,7 @@ export function DeliveryPanel({
         );
         return;
       }
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatApiError(e));
     }
   }, []);
 
@@ -143,7 +144,7 @@ export function DeliveryPanel({
         );
         return;
       }
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatApiError(e));
     } finally {
       setRegenerating(false);
     }
@@ -166,7 +167,7 @@ export function DeliveryPanel({
       if (e instanceof ApiError) {
         setError(`PDF preview failed: ${e.message} (HTTP ${e.status})`);
       } else {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(formatApiError(e));
       }
     }
   }
@@ -192,9 +193,7 @@ export function DeliveryPanel({
         } catch (e) {
           // Non-fatal: surface via error strip but proceed with send.
           setError(
-            `Saving to client record failed: ${
-              e instanceof Error ? e.message : String(e)
-            }. Proceeding with send.`,
+            `Saving to client record failed: ${formatApiError(e)}. Proceeding with send.`,
           );
         }
       }
@@ -228,7 +227,7 @@ export function DeliveryPanel({
       if (e instanceof ApiError) {
         setError(`Send failed: ${e.message} (HTTP ${e.status})`);
       } else {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(formatApiError(e));
       }
     }
   }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 
 /* ---------------------------- Types ---------------------------- */
 
@@ -77,7 +78,7 @@ export function useCalendarData(opts: { horizonDays?: number; lookbackDays?: num
       .then((r) => { if (!cancelled) setData(r); })
       .catch((e) => {
         if (cancelled) return;
-        setError(e instanceof ApiError ? `${e.status}: ${e.message}` : String(e));
+        setError(formatApiError(e));
         setData(null);
       })
       .finally(() => { if (!cancelled) setLoading(false); });

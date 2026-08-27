@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import { setAccessToken } from "@/lib/auth";
+import { formatApiError } from "@/lib/format-api-error";
 import { ErrorBanner } from "@/components/v2/ui/ErrorBanner";
 import { LoadingState } from "@/components/v2/ui/LoadingState";
 
@@ -171,8 +172,9 @@ export default function MfaSetupPage() {
       }
       router.push("/v2/dashboard");
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // Backend returns "invalid totp" on wrong code.
+      const msg = formatApiError(e);
+      // Backend returns "invalid totp" on wrong code — match against the
+      // ApiError message field (which drops object-shaped detail cleanly).
       setVerifyError(msg === "invalid totp" ? "Wrong code — try again with a freshly generated 6-digit code." : msg);
     } finally {
       setVerifying(false);

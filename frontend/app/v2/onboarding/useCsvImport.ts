@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { getAccessToken } from "@/lib/auth";
+import { formatApiError } from "@/lib/format-api-error";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
@@ -82,7 +83,7 @@ export function useCsvImport(onCommit?: () => void): CsvImportState {
       setResult(r);
       setMapping(r.resolved_mapping);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatApiError(e));
       setResult(null);
     } finally {
       setLoading(false);
@@ -98,7 +99,7 @@ export function useCsvImport(onCommit?: () => void): CsvImportState {
       const r = await callImport(file, m, true);
       setResult(r);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatApiError(e));
     } finally {
       setLoading(false);
     }
@@ -114,7 +115,7 @@ export function useCsvImport(onCommit?: () => void): CsvImportState {
       setCommitted(true);
       onCommit?.();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatApiError(e));
     } finally {
       setLoading(false);
     }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 
 /* ---------------------------- Types ---------------------------- */
 
@@ -130,7 +131,7 @@ export function useFilingList(
       })
       .catch((e) => {
         if (cancelled) return;
-        setError(e instanceof ApiError ? `${e.status}: ${e.message}` : String(e));
+        setError(formatApiError(e));
         setFilings(null);
       })
       .finally(() => {
@@ -203,9 +204,7 @@ export function useFilingDetail(filingId: string | null): DetailState {
         });
       } catch (e) {
         if (cancelled) return;
-        setError(
-          e instanceof ApiError ? `${e.status}: ${e.message}` : String(e),
-        );
+        setError(formatApiError(e));
         setData({ filing: null, readiness: null, activity: null });
       } finally {
         if (!cancelled) setLoading(false);
@@ -252,8 +251,7 @@ export function useFilingMutations(
       } catch (e) {
         setState({
           running: false,
-          error:
-            e instanceof ApiError ? `${e.status}: ${e.message}` : String(e),
+          error: formatApiError(e),
         });
       }
     },

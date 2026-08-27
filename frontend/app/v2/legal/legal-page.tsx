@@ -18,6 +18,8 @@
 
 import { useEffect, useState } from "react";
 
+import { formatApiError } from "@/lib/format-api-error";
+
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
@@ -44,7 +46,7 @@ export default function LegalPage({ docType, title }: { docType: "terms" | "dpa"
         return (await r.json()) as Doc;
       })
       .then((d) => { if (!cancelled) setDoc(d); })
-      .catch((e) => { if (!cancelled) setErr(String(e)); });
+      .catch((e) => { if (!cancelled) setErr(formatApiError(e)); });
     return () => { cancelled = true; };
   }, [docType]);
 

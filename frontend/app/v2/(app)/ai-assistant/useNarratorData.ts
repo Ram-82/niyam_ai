@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, apiBlob, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 
 /* ---------------------------- Backend types ---------------------------- */
 
@@ -39,7 +40,7 @@ export function useNarratorRuns(): NarratorState {
       .then((r) => { if (!cancelled) setRuns(r); })
       .catch((e) => {
         if (cancelled) return;
-        setError(e instanceof ApiError ? `${e.status}: ${e.message}` : String(e));
+        setError(formatApiError(e));
         setRuns(null);
       })
       .finally(() => { if (!cancelled) setLoading(false); });

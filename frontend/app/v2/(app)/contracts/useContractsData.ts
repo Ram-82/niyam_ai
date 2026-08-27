@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 
 /* ---------------------------- Backend types ---------------------------- */
 
@@ -119,7 +120,7 @@ export function useOcrDetail(id: string | null): {
       .then((r) => { if (!cancelled) setDetail(r); })
       .catch((e) => {
         if (cancelled) return;
-        setError(e instanceof ApiError ? `${e.status}: ${e.message}` : String(e));
+        setError(formatApiError(e));
         setDetail(null);
       })
       .finally(() => { if (!cancelled) setLoading(false); });
