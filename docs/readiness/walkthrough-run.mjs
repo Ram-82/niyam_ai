@@ -69,6 +69,7 @@ process.env.COMPOSE_FILE = [
 ].join(path.delimiter);
 
 const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
+const API = process.env.NIYAM_API_BASE || "http://localhost:8000";
 
 // ─── TOTP (RFC 6238, SHA-1, 6 digits, 30s window) ───
 function base32Decode(s) {
@@ -418,6 +419,51 @@ async function diagnose(cursor, expected) {
   };
 }
 
+// Read the firm's immutable action log through the product's own
+// /audit-log surface, carrying the same bearer token the app uses. Going
+// through the API rather than psql proves the row is *retrievable by the
+// CA*, not merely present in a table.
+async function auditRows(entityId, actionPrefix) {
+  const token = await page.evaluate(() => window.localStorage.getItem("niyam.access_token"));
+  const r = await page.request.get(
+    `${API}/audit-log?entity_type=filing_run&entity_id=${entityId}&action_prefix=${actionPrefix}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (r.status() >= 400) {
+    return { error: `GET /audit-log returned ${r.status()}`, rows: [] };
+  }
+  const rows = await r.json().catch(() => []);
+  return { rows: Array.isArray(rows) ? rows : [] };
+}
+
+// I3 (the log is immutable and load-bearing) and I6 (a figure without a
+// retrievable provenance trail is not defensible) both depend on the
+// approving user and the time being recorded. If that silently stopped
+// happening, no current test would notice — the status pill would still
+// read "filed". Assert the provenance, not just the transition.
+async function assertAuditProvenance(entityId, actionPrefix, expectEmail) {
+  const { rows, error } = await auditRows(entityId, actionPrefix);
+  if (error) return { ok: false, why: error };
+  if (!rows.length) {
+    return { ok: false, why: `no audit_log row with action prefix '${actionPrefix}' for filing_run ${entityId}` };
+  }
+  const row = rows[0];
+  const problems = [];
+  if (!row.user_id) problems.push("user_id is null — the acting user was not recorded");
+  if (expectEmail && row.user_email !== expectEmail) {
+    problems.push(`user_email '${row.user_email}' does not match the acting user '${expectEmail}'`);
+  }
+  if (!row.at || Number.isNaN(Date.parse(row.at))) {
+    problems.push(`'at' is missing or unparseable: ${JSON.stringify(row.at)}`);
+  }
+  return {
+    ok: problems.length === 0,
+    why: problems.join("; "),
+    row: { action: row.action, user_id: row.user_id, user_email: row.user_email, at: row.at, diff: row.diff },
+    rowCount: rows.length,
+  };
+}
+
 async function stop(step, detail) {
   log(step, "STOPPED", detail);
   await browser.close();
@@ -526,6 +572,7 @@ try {
 
 let gstinProfileId = null;
 let gstinBody = "";
+let filingId = null;
 
 try {
   // ─── Step 2: create a client via legacy /settings ───
@@ -789,12 +836,29 @@ try {
   const genBtn = await firstVisible([page.locator("[data-testid=filings-generate]")]);
   if (!genBtn) return stop("11.filing-generate", { source: "RENDERED_UI", ...(await diagnose(c, "[data-testid=filings-generate]")) });
   await genBtn.click();
+  const genResp = await page.waitForResponse(
+    (r) => r.url().includes("/filings/generate") && r.request().method() === "POST",
+    { timeout: 20000 },
+  ).catch(() => null);
+  if (!genResp) return stop("11.filing-generate", { source: "NETWORK", ...(await diagnose(c, "POST /filings/generate response")) });
+  const genBody = await genResp.text().catch(() => "");
+  if (genResp.status() >= 400) {
+    return stop("11.filing-generate", { source: "NETWORK", reason: `/filings/generate returned ${genResp.status()}`, body: genBody.slice(0, 300) });
+  }
+  filingId = (() => { try { return JSON.parse(genBody).id ?? null; } catch { return null; } })();
   await page.waitForLoadState("networkidle").catch(() => {});
   const statusAfterGen = await page.locator("[data-testid=filings-status]").innerText().catch(() => "");
   if (!/draft/i.test(statusAfterGen)) {
     return stop("11.filing-generate", { source: "RENDERED_UI", reason: `expected status 'draft' after generate, rendered '${statusAfterGen}'`, ...(await diagnose(c, "filings-status = draft")) });
   }
-  log("11.filing-generated", "ok", { source: "RENDERED_UI", status: statusAfterGen.trim() });
+  log("11.filing-generated", "ok", { source: "RENDERED_UI", status: statusAfterGen.trim(), filing_run_id: filingId });
+  if (!filingId) {
+    return stop("11.filing-generated", {
+      source: "NETWORK",
+      reason: "POST /filings/generate returned no filing id, so approval provenance cannot be asserted downstream",
+      body: genBody.slice(0, 300),
+    });
+  }
 
   // ─── Step 12: approve ───
   c = mark();
@@ -806,7 +870,20 @@ try {
   if (!/approved/i.test(statusAfterApprove)) {
     return stop("12.filing-approve", { source: "RENDERED_UI", reason: `expected status 'approved', rendered '${statusAfterApprove}'`, ...(await diagnose(c, "filings-status = approved")) });
   }
-  log("12.filing-approved", "ok", { source: "RENDERED_UI", status: statusAfterApprove.trim() });
+  const approveAudit = await assertAuditProvenance(filingId, "filing.approved", creds.admin_email);
+  if (!approveAudit.ok) {
+    return stop("12.filing-approve-provenance", {
+      source: "NETWORK",
+      reason: `status transitioned to 'approved' but the audit trail is incomplete: ${approveAudit.why}`,
+      note: "I3/I6 — a status change without a retrievable acting user and timestamp is not defensible eighteen months later, which is the product's entire differentiator.",
+      audit: approveAudit.row ?? null,
+    });
+  }
+  log("12.filing-approved", "ok", {
+    source: "RENDERED_UI",
+    status: statusAfterApprove.trim(),
+    auditProvenance: approveAudit.row,
+  });
 
   // ─── Step 13: mark filed — the readiness bar ───
   c = mark();
@@ -825,9 +902,19 @@ try {
   if (!/filed/i.test(finalStatus)) {
     return stop("13.mark-filed", { source: "RENDERED_UI", reason: `expected status 'filed', rendered '${finalStatus}'`, ...(await diagnose(c, "filings-status = filed")) });
   }
+  const filedAudit = await assertAuditProvenance(filingId, "filing.filed", creds.admin_email);
+  if (!filedAudit.ok) {
+    return stop("13.mark-filed-provenance", {
+      source: "NETWORK",
+      reason: `status transitioned to 'filed' but the audit trail is incomplete: ${filedAudit.why}`,
+      note: "I3/I6 — the filed transition is the one a scrutiny notice asks about. Without the acting user and timestamp it is not evidence.",
+      audit: filedAudit.row ?? null,
+    });
+  }
   log("13.marked-filed", "ok", {
     source: "RENDERED_UI",
     status: finalStatus.trim(),
+    auditProvenance: filedAudit.row,
     claim: "The cycle closes against the MOCK GSP adapter. This is not evidence that it closes against live GSTN.",
   });
 } catch (err) {
