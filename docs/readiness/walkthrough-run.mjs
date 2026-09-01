@@ -298,6 +298,27 @@ try {
   bail("prep.fixture", { at: String(err.message).slice(0, 300) });
 }
 
+// Which adapter is the backend actually running? Step 7 submits the mock
+// server's fixed OTP, so a non-mock adapter cannot work here by
+// construction. Assert it rather than assume it — the repo `.env` sets
+// GSP_MODE=whitebooks, and a run that silently used the live sandbox
+// produced a 502 that was read as a code blocker for a week.
+try {
+  const modeRaw = sh(`curl -sf ${API}/gsp/mode`).trim();
+  const mode = JSON.parse(modeRaw);
+  log("prep.gsp-mode", mode.gsp_mode === "mock" ? "ok" : "STOPPED", {
+    reported: mode,
+    claimCeiling: "A green run proves the cycle closes against MOCK GSP. It is not evidence about live GSTN.",
+  });
+  if (mode.gsp_mode !== "mock") {
+    bail("prep.gsp-mode", {
+      reason: `backend reports gsp_mode='${mode.gsp_mode}', but step 7 submits the mock server's fixed OTP. Re-run with the readiness overlay, which pins mock.`,
+    });
+  }
+} catch (err) {
+  bail("prep.gsp-mode", { reason: `could not read ${API}/gsp/mode`, at: String(err.message).slice(0, 200) });
+}
+
 let creds;
 try {
   sh(`docker compose exec -T postgres psql -U niyam -d niyam -c "TRUNCATE ca_firm CASCADE" >/dev/null`);
