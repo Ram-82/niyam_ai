@@ -184,7 +184,10 @@ if (process.env.NIYAM_SKIP_BUILD === "1") {
   });
 } else {
   try {
-    sh(`docker compose up -d postgres redis api gsp-mock`, { stdio: ["ignore", "pipe", "pipe"] });
+    // `worker` is not optional: /imports/invoices enqueues an RQ job and
+    // returns 202. Without the worker the register is never ingested and the
+    // reconciliation step reads as a product gap.
+    sh(`docker compose up -d postgres redis api gsp-mock worker`, { stdio: ["ignore", "pipe", "pipe"] });
   } catch (err) {
     bail("0.stack-up", { at: String(err.stderr || err.message).slice(0, 600) });
   }
@@ -444,17 +447,22 @@ async function diagnose(cursor, expected) {
 // /audit-log surface, carrying the same bearer token the app uses. Going
 // through the API rather than psql proves the row is *retrievable by the
 // CA*, not merely present in a table.
-async function auditRows(entityId, actionPrefix) {
+async function apiGet(pathWithQuery) {
   const token = await page.evaluate(() => window.localStorage.getItem("niyam.access_token"));
-  const r = await page.request.get(
-    `${API}/audit-log?entity_type=filing_run&entity_id=${entityId}&action_prefix=${actionPrefix}`,
-    { headers: { Authorization: `Bearer ${token}` } },
+  const r = await page.request.get(`${API}${pathWithQuery}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const status = r.status();
+  const json = status < 400 ? await r.json().catch(() => null) : null;
+  return { status, json, text: status >= 400 ? (await r.text().catch(() => "")).slice(0, 300) : "" };
+}
+
+async function auditRows(entityId, actionPrefix) {
+  const { status, json } = await apiGet(
+    `/audit-log?entity_type=filing_run&entity_id=${entityId}&action_prefix=${actionPrefix}`,
   );
-  if (r.status() >= 400) {
-    return { error: `GET /audit-log returned ${r.status()}`, rows: [] };
-  }
-  const rows = await r.json().catch(() => []);
-  return { rows: Array.isArray(rows) ? rows : [] };
+  if (status >= 400) return { error: `GET /audit-log returned ${status}`, rows: [] };
+  return { rows: Array.isArray(json) ? json : [] };
 }
 
 // I3 (the log is immutable and load-bearing) and I6 (a figure without a
@@ -815,7 +823,58 @@ try {
   if (uploadResp.status() >= 400) {
     return stop("9.register-uploaded", { source: "NETWORK", reason: `/imports/invoices returned ${uploadResp.status()}`, body: upBody.slice(0, 300) });
   }
-  log("9.register-uploaded", "ok", { status: uploadResp.status(), body: upBody.slice(0, 200) });
+  // /imports/invoices returns 202 Accepted and enqueues an RQ job. A 202 is
+  // "the file was received", not "the register was ingested" — if the worker
+  // is down the job sits at 'queued' forever, no invoices land, and the
+  // reconciliation step downstream blames the product for an empty result.
+  // Poll to a terminal state and assert rows actually landed.
+  const jobId = (() => { try { return JSON.parse(upBody).id ?? null; } catch { return null; } })();
+  if (!jobId) {
+    return stop("9.register-uploaded", {
+      source: "NETWORK",
+      reason: "POST /imports/invoices returned no job id, so ingestion cannot be confirmed",
+      status: uploadResp.status(),
+      body: upBody.slice(0, 300),
+    });
+  }
+  let job = null;
+  const jobDeadline = Date.now() + 60_000;
+  while (Date.now() < jobDeadline) {
+    const { status, json, text } = await apiGet(`/imports/${jobId}`);
+    if (status >= 400) {
+      return stop("9.register-ingested", { source: "NETWORK", reason: `GET /imports/${jobId} returned ${status}`, body: text });
+    }
+    job = json;
+    if (job && (job.status === "completed" || job.status === "failed")) break;
+    await page.waitForTimeout(1000);
+  }
+  if (!job || (job.status !== "completed" && job.status !== "failed")) {
+    return stop("9.register-ingested", {
+      source: "NETWORK",
+      reason: `import job stayed at '${job?.status ?? "unknown"}' for 60s — it never reached a terminal state`,
+      hint: "the RQ worker processes this queue; a stopped worker leaves the job queued while the upload still reports 202",
+      job,
+    });
+  }
+  if (job.status === "failed" || !(job.accepted_rows > 0)) {
+    return stop("9.register-ingested", {
+      source: "NETWORK",
+      reason: `import job finished '${job.status}' with accepted_rows=${job.accepted_rows} — nothing was ingested, so nothing downstream can be proven`,
+      job: {
+        status: job.status,
+        total_rows: job.total_rows,
+        accepted_rows: job.accepted_rows,
+        rejected_rows: job.rejected_rows,
+        error_message: job.error_message,
+        summary: job.summary,
+      },
+    });
+  }
+  log("9.register-ingested", "ok", {
+    source: "NETWORK",
+    status: uploadResp.status(),
+    job: { status: job.status, total_rows: job.total_rows, accepted_rows: job.accepted_rows, rejected_rows: job.rejected_rows },
+  });
 
   // ─── Step 10: trigger reconciliation from the browser ───
   c = mark();
