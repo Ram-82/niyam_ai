@@ -22,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import get_current_user, get_firm_scoped_session
+from app.legal.gate import require_legal_accepted
 from app.auth import audit
 from app.models.tables import AppUser
 
@@ -129,6 +130,7 @@ def create_contact(
     payload: CreateReq,
     user: AppUser = Depends(get_current_user),
     session=Depends(get_firm_scoped_session),
+    _legal: None = Depends(require_legal_accepted),
 ) -> SupplierContactRow:
     _validate_input(payload.supplier_gstin, payload.whatsapp_number)
     try:

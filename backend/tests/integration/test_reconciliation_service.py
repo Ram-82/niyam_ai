@@ -193,7 +193,7 @@ def test_full_reconciliation_produces_four_buckets(firm_gstin) -> None:
     assert s["supplier_default"]["count"] == 1
     assert s["supplier_default"]["paise"] == 30_000
     assert s["missing_entry"]["count"] == 1
-    assert s["disclaimer"] == "before credit/debit note adjustments"
+    assert "before credit/debit note adjustments" in s["disclaimer"]
 
     # Persisted rows: 1 matched + 1 probable + 1 supplier_default + 1 missing = 4
     with owner_engine.begin() as conn:

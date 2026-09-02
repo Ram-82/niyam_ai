@@ -35,7 +35,9 @@ from app.narrator.types import (
     NarrationFacts,
     NarrationOutput,
     NarratorDisabled,
+    NarratorError,
     NumberHallucination,
+    TokenUsage,
 )
 
 
@@ -182,6 +184,14 @@ def _seed_readiness(
 
 
 def _make_gstin(bootstrap: dict) -> uuid.UUID:
+    """Create a client + GSTIN in the bootstrapped firm.
+
+    Also flips ``ca_firm.narrator_enabled=true`` for the firm — the
+    P2.4 Step 2 migration defaults new firms to OFF (opt-in) but every
+    test in this module wants narration to work. Real-world analog is
+    a firm admin enabling narration in Settings → Preferences before
+    exercising the feature.
+    """
     firm_id = bootstrap["firm_id"]
     client_id = uuid.uuid4()
     gstin_id = uuid.uuid4()
@@ -198,6 +208,10 @@ def _make_gstin(bootstrap: dict) -> uuid.UUID:
                 "VALUES (:gid, :fid, :cid, '29ABCDE1234F1Z5', '29')"
             ),
             {"gid": gstin_id, "fid": firm_id, "cid": client_id},
+        )
+        conn.execute(
+            text("UPDATE ca_firm SET narrator_enabled = true WHERE id = :fid"),
+            {"fid": firm_id},
         )
     return gstin_id
 
@@ -370,6 +384,600 @@ def test_double_hallucination_bubbles(
             period="202607",
             language="en",
         )
+
+
+# ---------------------------------------------------------------------------
+# Append-only guard — UPDATE + DELETE on narration_run must raise.
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Per-firm narrator toggle — P2.4 Step 2
+# ---------------------------------------------------------------------------
+
+
+def test_per_firm_flag_off_raises_disabled(bootstrap_firm) -> None:
+    """Firm with narrator_enabled=false → NarratorDisabled even with
+    global flag on."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)  # sets narrator_enabled=true
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+
+    # Now flip THIS firm's per-firm flag back off.
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE ca_firm SET narrator_enabled = false WHERE id = :fid"
+            ),
+            {"fid": str(b["firm_id"])},
+        )
+
+    with pytest.raises(NarratorDisabled):
+        service.narrate_for_period(
+            firm_id=b["firm_id"],
+            gstin_profile_id=gpid,
+            return_type="GSTR1",
+            period="202607",
+            language="en",
+        )
+
+
+def test_per_firm_isolation_a_on_b_off(bootstrap_firm) -> None:
+    """Firm A narrator=true → succeeds. Firm B narrator=false → NarratorDisabled.
+    Global flag stays on the whole time."""
+    a = bootstrap_firm(admin_email="iso-a@example.com")
+    b = bootstrap_firm(admin_email="iso-b@example.com")
+    gpid_a = _make_gstin(a)  # sets A on
+    gpid_b = _make_gstin(b)  # sets B on
+    _seed_readiness(firm_id=a["firm_id"], gstin_profile_id=gpid_a)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid_b)
+
+    # Turn firm B off.
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE ca_firm SET narrator_enabled = false WHERE id = :fid"
+            ),
+            {"fid": str(b["firm_id"])},
+        )
+
+    # Firm A still succeeds.
+    output_a, _ = service.narrate_for_period(
+        firm_id=a["firm_id"],
+        gstin_profile_id=gpid_a,
+        return_type="GSTR1",
+        period="202607",
+        language="en",
+    )
+    assert output_a.provider == "mock"
+
+    # Firm B raises.
+    with pytest.raises(NarratorDisabled):
+        service.narrate_for_period(
+            firm_id=b["firm_id"],
+            gstin_profile_id=gpid_b,
+            return_type="GSTR1",
+            period="202607",
+            language="en",
+        )
+
+
+def test_global_off_kills_all_firms_regardless_of_per_firm(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    """Global NARRATOR_ENABLED=false → NarratorDisabled even if the firm
+    has narrator_enabled=true. The global flag is the operator kill
+    switch — trumps every per-firm decision."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)  # sets firm narrator_enabled=true
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+
+    # Firm is on, but global is off → still disabled.
+    monkeypatch.setattr(settings, "narrator_enabled", False)
+    with pytest.raises(NarratorDisabled):
+        service.narrate_for_period(
+            firm_id=b["firm_id"],
+            gstin_profile_id=gpid,
+            return_type="GSTR1",
+            period="202607",
+            language="en",
+        )
+
+
+def test_per_firm_off_skips_llm_before_call_log(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    """A firm-off request must not touch the adapter, must not write a
+    narrator_call_log row. Load-bearing: we don't want to log 'call
+    attempted' when the CA didn't even opt in — that would poison the
+    cost dashboard."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+
+    # Turn firm off.
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE ca_firm SET narrator_enabled = false WHERE id = :fid"
+            ),
+            {"fid": str(b["firm_id"])},
+        )
+
+    # A stub that WOULD fail the test if called, to prove get_adapter
+    # was skipped entirely.
+    class _MustNotBeCalled:
+        provider = "must-not"
+        model = "must-not"
+
+        def narrate(self, *a, **kw):
+            raise AssertionError("adapter should not have been invoked")
+
+    monkeypatch.setattr(service, "get_adapter", lambda: _MustNotBeCalled())
+
+    with pytest.raises(NarratorDisabled):
+        service.narrate_for_period(
+            firm_id=b["firm_id"],
+            gstin_profile_id=gpid,
+            return_type="GSTR1",
+            period="202607",
+            language="en",
+        )
+
+    # No call_log row was written.
+    rows = _read_call_logs(b["firm_id"])
+    assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# narrator_call_log — cost + cache-hit meter
+# ---------------------------------------------------------------------------
+
+
+def _read_call_logs(firm_id) -> list[dict]:
+    """Return all narrator_call_log rows for a firm, oldest first."""
+    with owner_engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT attempt, succeeded, error_kind, provider, model, "
+                "language, input_tokens, output_tokens, "
+                "cache_read_input_tokens, cache_creation_input_tokens, "
+                "latency_ms "
+                "FROM narrator_call_log WHERE firm_id = :fid "
+                "ORDER BY at ASC, attempt ASC"
+            ),
+            {"fid": str(firm_id)},
+        ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+class _UsageStubAdapter:
+    """Emits clean prose + explicit usage values (mimics AnthropicNarrator)."""
+
+    provider = "stub-anthropic"
+    model = "claude-stub"
+
+    def __init__(self, *, input_tokens=1200, output_tokens=350,
+                 cache_read=800, cache_creation=0) -> None:
+        self._usage = TokenUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_input_tokens=cache_read,
+            cache_creation_input_tokens=cache_creation,
+        )
+
+    def narrate(self, facts, language, *, strict_reminder: bool = False):
+        return NarrationOutput(
+            page1_health=f"Sales stood at ₹{facts.sales_paise // 100}.",
+            page1_tax_position="",
+            page2_attention="",
+            page2_ask_your_ca="",
+            provider=self.provider,
+            model=self.model,
+            language=language,
+            usage=self._usage,
+        )
+
+
+class _AdapterErrorAdapter:
+    provider = "stub-anthropic"
+    model = "claude-stub"
+
+    def narrate(self, facts, language, *, strict_reminder: bool = False):
+        raise NarratorError("simulated SDK failure")
+
+
+def test_happy_path_writes_one_call_log_row(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+    monkeypatch.setattr(service, "get_adapter", lambda: _UsageStubAdapter())
+
+    service.narrate_for_period(
+        firm_id=b["firm_id"],
+        gstin_profile_id=gpid,
+        return_type="GSTR1",
+        period="202607",
+        language="en",
+    )
+
+    rows = _read_call_logs(b["firm_id"])
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["attempt"] == 1
+    assert r["succeeded"] is True
+    assert r["error_kind"] is None
+    assert r["provider"] == "stub-anthropic"
+    assert r["model"] == "claude-stub"
+    assert r["language"] == "en"
+    assert r["input_tokens"] == 1200
+    assert r["output_tokens"] == 350
+    assert r["cache_read_input_tokens"] == 800
+    assert r["cache_creation_input_tokens"] == 0
+    assert r["latency_ms"] >= 0
+
+
+def test_mock_adapter_writes_row_with_null_tokens(bootstrap_firm) -> None:
+    """The mock adapter makes no LLM call — token columns must be NULL,
+    NOT 0. NULL means 'no LLM call was made'; 0 would mean
+    'called and reported 0', which would be a bug."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+
+    service.narrate_for_period(
+        firm_id=b["firm_id"],
+        gstin_profile_id=gpid,
+        return_type="GSTR1",
+        period="202607",
+        language="en",
+    )
+
+    rows = _read_call_logs(b["firm_id"])
+    assert len(rows) == 1
+    assert rows[0]["provider"] == "mock"
+    assert rows[0]["input_tokens"] is None
+    assert rows[0]["output_tokens"] is None
+    assert rows[0]["cache_read_input_tokens"] is None
+    assert rows[0]["cache_creation_input_tokens"] is None
+    # But latency still measured — mock is fast so this is a small int.
+    assert rows[0]["latency_ms"] is not None
+    assert rows[0]["latency_ms"] >= 0
+
+
+def test_hallucination_retry_writes_two_rows(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    """attempt=1 logged with error_kind='hallucination', succeeded=false;
+    attempt=2 logged with succeeded=true."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+    monkeypatch.setattr(service, "get_adapter", lambda: _StubAdapter())
+
+    service.narrate_for_period(
+        firm_id=b["firm_id"],
+        gstin_profile_id=gpid,
+        return_type="GSTR1",
+        period="202607",
+        language="en",
+    )
+
+    rows = _read_call_logs(b["firm_id"])
+    assert len(rows) == 2
+    assert rows[0]["attempt"] == 1
+    assert rows[0]["succeeded"] is False
+    assert rows[0]["error_kind"] == "hallucination"
+    assert rows[1]["attempt"] == 2
+    assert rows[1]["succeeded"] is True
+    assert rows[1]["error_kind"] is None
+
+
+def test_double_hallucination_writes_two_failure_rows(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+    monkeypatch.setattr(service, "get_adapter", lambda: _AlwaysBadAdapter())
+
+    with pytest.raises(NumberHallucination):
+        service.narrate_for_period(
+            firm_id=b["firm_id"],
+            gstin_profile_id=gpid,
+            return_type="GSTR1",
+            period="202607",
+            language="en",
+        )
+
+    rows = _read_call_logs(b["firm_id"])
+    assert len(rows) == 2
+    assert all(r["succeeded"] is False for r in rows)
+    assert all(r["error_kind"] == "hallucination" for r in rows)
+    assert [r["attempt"] for r in rows] == [1, 2]
+
+
+def test_adapter_error_writes_failure_row(
+    monkeypatch: pytest.MonkeyPatch, bootstrap_firm
+) -> None:
+    """SDK-level failure (JSON parse error, API 500, timeout) is caught
+    and logged BEFORE the exception propagates — so cost dashboards can
+    still see failed-call cost + latency."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+    monkeypatch.setattr(service, "get_adapter", lambda: _AdapterErrorAdapter())
+
+    with pytest.raises(NarratorError):
+        service.narrate_for_period(
+            firm_id=b["firm_id"],
+            gstin_profile_id=gpid,
+            return_type="GSTR1",
+            period="202607",
+            language="en",
+        )
+
+    rows = _read_call_logs(b["firm_id"])
+    assert len(rows) == 1
+    assert rows[0]["attempt"] == 1
+    assert rows[0]["succeeded"] is False
+    assert rows[0]["error_kind"] == "adapter_error"
+    # Token cols NULL — no LLM response reached us.
+    assert rows[0]["input_tokens"] is None
+
+
+def test_call_log_is_append_only(bootstrap_firm) -> None:
+    """Mirrors the narration_run + gsp_call_log invariant — no UPDATE, no DELETE."""
+    b = bootstrap_firm()
+    gpid = _make_gstin(b)
+    _seed_readiness(firm_id=b["firm_id"], gstin_profile_id=gpid)
+    service.narrate_for_period(
+        firm_id=b["firm_id"],
+        gstin_profile_id=gpid,
+        return_type="GSTR1",
+        period="202607",
+        language="en",
+    )
+    with owner_engine.begin() as conn:
+        with pytest.raises(Exception, match="append-only"):
+            conn.execute(
+                text(
+                    "UPDATE narrator_call_log SET succeeded = false "
+                    "WHERE firm_id = :fid"
+                ),
+                {"fid": str(b["firm_id"])},
+            )
+    with owner_engine.begin() as conn:
+        with pytest.raises(Exception, match="append-only"):
+            conn.execute(
+                text(
+                    "DELETE FROM narrator_call_log WHERE firm_id = :fid"
+                ),
+                {"fid": str(b["firm_id"])},
+            )
+
+
+# ---------------------------------------------------------------------------
+# monthly_narrator_stats — P2.4 Step 3 cost + cache-hit meter
+# ---------------------------------------------------------------------------
+
+
+def _insert_call_log(
+    firm_id,
+    *,
+    provider="anthropic",
+    model="claude-opus-4-7",
+    succeeded=True,
+    error_kind=None,
+    input_tokens=1000,
+    output_tokens=300,
+    cache_read=800,
+    cache_creation=0,
+    latency_ms=200,
+    at=None,
+):
+    """Direct-insert into narrator_call_log for controlled cost tests.
+
+    Bypasses the service layer so tests can seed rows across months +
+    models without needing 100 different narration runs.
+    """
+    with owner_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO narrator_call_log (
+                    firm_id, provider, model, attempt, language,
+                    succeeded, error_kind,
+                    input_tokens, output_tokens,
+                    cache_read_input_tokens, cache_creation_input_tokens,
+                    latency_ms, at
+                ) VALUES (
+                    :fid, :prov, :model, 1, 'en',
+                    :ok, :ek,
+                    :it, :ot, :crt, :cct,
+                    :ms, COALESCE(:at, now())
+                )
+                """
+            ),
+            {
+                "fid": str(firm_id),
+                "prov": provider,
+                "model": model,
+                "ok": succeeded,
+                "ek": error_kind,
+                "it": input_tokens,
+                "ot": output_tokens,
+                "crt": cache_read,
+                "cct": cache_creation,
+                "ms": latency_ms,
+                "at": at,
+            },
+        )
+
+
+def _current_month() -> str:
+    from datetime import datetime, timezone
+    now = datetime.now(tz=timezone.utc)
+    return f"{now.year:04d}{now.month:02d}"
+
+
+def test_monthly_stats_empty_month(bootstrap_firm) -> None:
+    b = bootstrap_firm()
+    stats = service.monthly_narrator_stats(
+        firm_id=b["firm_id"], month=_current_month()
+    )
+    assert stats["total_calls"] == 0
+    assert stats["succeeded"] == 0
+    assert stats["failed"] == 0
+    assert stats["input_tokens"] == 0
+    assert stats["cache_hit_rate"] is None  # no data → no meaningful rate
+    assert stats["estimated_usd"] == 0.0  # no unpriced models seen
+    assert stats["per_model"] == []
+    assert stats["latency_ms_p50"] is None
+
+
+def test_monthly_stats_aggregates_tokens_and_calls(bootstrap_firm) -> None:
+    b = bootstrap_firm()
+    fid = b["firm_id"]
+    # 3 successful calls, all opus, all with cache hits.
+    for _ in range(3):
+        _insert_call_log(
+            fid,
+            input_tokens=1000,
+            output_tokens=300,
+            cache_read=800,
+            cache_creation=100,
+            latency_ms=200,
+        )
+    # 1 failed call, no tokens.
+    _insert_call_log(
+        fid,
+        succeeded=False,
+        error_kind="adapter_error",
+        input_tokens=0,
+        output_tokens=0,
+        cache_read=0,
+        cache_creation=0,
+        latency_ms=500,
+    )
+
+    stats = service.monthly_narrator_stats(firm_id=fid, month=_current_month())
+    assert stats["total_calls"] == 4
+    assert stats["succeeded"] == 3
+    assert stats["failed"] == 1
+    assert stats["failures_by_kind"] == {"adapter_error": 1}
+    assert stats["input_tokens"] == 3000
+    assert stats["output_tokens"] == 900
+    assert stats["cache_read_input_tokens"] == 2400
+    assert stats["cache_creation_input_tokens"] == 300
+
+
+def test_monthly_stats_cache_hit_rate_math(bootstrap_firm) -> None:
+    """cache_read / (input + cache_read + cache_creation) as a percentage."""
+    b = bootstrap_firm()
+    fid = b["firm_id"]
+    # input=1000, cache_read=8000, cache_creation=1000 → 8000 / 10000 = 80%
+    _insert_call_log(
+        fid,
+        input_tokens=1000,
+        cache_read=8000,
+        cache_creation=1000,
+    )
+    stats = service.monthly_narrator_stats(firm_id=fid, month=_current_month())
+    assert stats["cache_hit_rate"] == 80.0
+
+
+def test_monthly_stats_priced_and_unpriced_models(bootstrap_firm) -> None:
+    """A known model produces USD; an unknown model returns None and
+    forces the aggregate estimated_usd to also be None (so the
+    dashboard flags unpriced data instead of silently under-counting)."""
+    b = bootstrap_firm()
+    fid = b["firm_id"]
+    _insert_call_log(fid, model="claude-opus-4-7", input_tokens=1000, output_tokens=100)
+    _insert_call_log(fid, model="claude-experimental-9-9", input_tokens=500, output_tokens=50)
+
+    stats = service.monthly_narrator_stats(firm_id=fid, month=_current_month())
+    assert len(stats["per_model"]) == 2
+    opus = next(r for r in stats["per_model"] if r["model"] == "claude-opus-4-7")
+    exp = next(r for r in stats["per_model"] if r["model"] == "claude-experimental-9-9")
+    assert opus["estimated_usd"] is not None
+    assert opus["estimated_usd"] > 0
+    assert exp["estimated_usd"] is None
+    # Aggregate must be None because at least one model was unpriced.
+    assert stats["estimated_usd"] is None
+
+
+def test_monthly_stats_usd_math_opus(bootstrap_firm) -> None:
+    """Verify the price math against known Anthropic Opus 4.7 list prices.
+
+    Prices ($/M): input=15, output=75, cache_read=1.50.
+    Row: input=1M, output=1M, cache_read=1M → fresh_input = 1M - 1M - 0 = 0
+    Expected: 0 * 15 + 1 * 75 + 1 * 1.50 = $76.50
+    """
+    b = bootstrap_firm()
+    _insert_call_log(
+        b["firm_id"],
+        model="claude-opus-4-7",
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        cache_read=1_000_000,
+        cache_creation=0,
+    )
+    stats = service.monthly_narrator_stats(
+        firm_id=b["firm_id"], month=_current_month()
+    )
+    assert stats["estimated_usd"] == pytest.approx(76.5, rel=1e-4)
+
+
+def test_monthly_stats_firm_isolation(bootstrap_firm) -> None:
+    """Firm A's stats never leak Firm B's rows (RLS + WHERE firm_id)."""
+    a = bootstrap_firm(admin_email="stats-a@example.com")
+    b = bootstrap_firm(admin_email="stats-b@example.com")
+    _insert_call_log(a["firm_id"], input_tokens=10_000)
+    _insert_call_log(b["firm_id"], input_tokens=99_999)
+
+    a_stats = service.monthly_narrator_stats(
+        firm_id=a["firm_id"], month=_current_month()
+    )
+    b_stats = service.monthly_narrator_stats(
+        firm_id=b["firm_id"], month=_current_month()
+    )
+    assert a_stats["input_tokens"] == 10_000
+    assert b_stats["input_tokens"] == 99_999
+
+
+def test_monthly_stats_month_filtering(bootstrap_firm) -> None:
+    """Rows outside the requested month are excluded."""
+    from datetime import datetime, timezone
+    b = bootstrap_firm()
+    fid = b["firm_id"]
+    # Row in the current month.
+    _insert_call_log(fid, input_tokens=100)
+    # Row 3 months ago.
+    old_at = datetime(2025, 1, 15, tzinfo=timezone.utc)
+    _insert_call_log(fid, input_tokens=99_999, at=old_at)
+
+    # Query current month → only sees the 100-input row.
+    now = datetime.now(tz=timezone.utc)
+    current_stats = service.monthly_narrator_stats(
+        firm_id=fid, month=f"{now.year:04d}{now.month:02d}"
+    )
+    assert current_stats["input_tokens"] == 100
+
+    # Query Jan 2025 → only sees the 99_999-input row.
+    jan_stats = service.monthly_narrator_stats(
+        firm_id=fid, month="202501"
+    )
+    assert jan_stats["input_tokens"] == 99_999
+
+
+def test_monthly_stats_rejects_bad_month(bootstrap_firm) -> None:
+    b = bootstrap_firm()
+    for bad in ("2026", "202613", "20260", "not-a-month"):
+        with pytest.raises(ValueError):
+            service.monthly_narrator_stats(firm_id=b["firm_id"], month=bad)
 
 
 # ---------------------------------------------------------------------------

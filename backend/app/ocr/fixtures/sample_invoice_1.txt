@@ -1,0 +1,27 @@
+TAX INVOICE
+
+Supplier:      ACME Traders Pvt Ltd
+GSTIN:         29ABCDE1234F1Z5
+Address:       12 MG Road, Bangalore, KA 560001
+
+Buyer:         Beta Industries LLP
+GSTIN:         29XYZAB5678H1Z3
+
+Invoice No:    INV-2026-0001
+Invoice Date:  2026-07-15
+Place:         Bangalore, KA
+
+------------------------------------------------------------
+Description                        HSN       Amount
+------------------------------------------------------------
+Consulting services — July 2026    998311    10,000.00
+------------------------------------------------------------
+
+                       Taxable Value:     10,000.00
+                       CGST @ 9%:            900.00
+                       SGST @ 9%:            900.00
+                       IGST:                   0.00
+                       -------------------------------
+                       Total (INR):       11,800.00
+
+Terms: Net 30 days.

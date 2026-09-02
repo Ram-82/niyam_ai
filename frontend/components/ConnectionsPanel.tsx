@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 import type {
   GspConnectionStatus,
   GspPullAttempt,
@@ -51,7 +52,7 @@ export function ConnectionsPanel({ gstinProfileId }: { gstinProfileId: string })
       );
       setStatus(s);
     } catch (e) {
-      setError(String(e));
+      setError(formatApiError(e));
     }
   }, [gstinProfileId]);
 
@@ -78,7 +79,7 @@ export function ConnectionsPanel({ gstinProfileId }: { gstinProfileId: string })
             : "a later time";
         setError(RATE_LIMIT_COPY.otp_sms_cooldown(at));
       } else {
-        setError(String(e));
+        setError(formatApiError(e));
       }
     } finally {
       setBusy(false);
@@ -113,7 +114,7 @@ export function ConnectionsPanel({ gstinProfileId }: { gstinProfileId: string })
             : "a later time";
         setError(RATE_LIMIT_COPY.otp_confirm_lockout(at));
       } else {
-        setError(String(e));
+        setError(formatApiError(e));
       }
     } finally {
       setBusy(false);
@@ -134,7 +135,7 @@ export function ConnectionsPanel({ gstinProfileId }: { gstinProfileId: string })
         setError("Reconnect required — session is no longer live.");
         await refresh();
       } else {
-        setError(String(e));
+        setError(formatApiError(e));
       }
     } finally {
       setBusy(false);
@@ -153,7 +154,7 @@ export function ConnectionsPanel({ gstinProfileId }: { gstinProfileId: string })
       });
       await refresh();
     } catch (e) {
-      setError(String(e));
+      setError(formatApiError(e));
     } finally {
       setBusy(false);
     }

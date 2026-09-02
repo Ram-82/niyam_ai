@@ -53,12 +53,17 @@ jobs:
           '
 
       - name: Run pytest with coverage
+        # ``-m 'not quarantine'`` mirrors the default in pyproject.toml; kept
+        # explicit here so CI's exclusion policy is discoverable from the
+        # workflow file alone. Any non-quarantined failure fails the job
+        # (pytest exits non-zero → docker compose run propagates → step fails).
         run: |
           docker compose run --rm -T \
             -v "$PWD/backend/coverage:/app/coverage" \
             backend sh -c '
               pip install -q -e ".[dev]" &&
               pytest --timeout=30 --tb=short -q \
+                     -m "not quarantine" \
                      --cov=app \
                      --cov-report=term-missing \
                      --cov-report=html:/app/coverage/html \

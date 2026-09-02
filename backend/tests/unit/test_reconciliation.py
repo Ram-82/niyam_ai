@@ -376,7 +376,7 @@ def test_summary_paise_totals_and_top_suppliers() -> None:
     assert summary["supplier_default"]["paise"] == 30_000 + 15_000 + 20_000
     assert summary["missing_entry"]["count"] == 1
     assert summary["missing_entry"]["paise"] == 10_000
-    assert summary["disclaimer"] == "before credit/debit note adjustments"
+    assert "before credit/debit note adjustments" in summary["disclaimer"]
 
     # SUP_A owes 45k, SUP_B owes 20k. Ranked descending.
     top = summary["supplier_default"]["top_suppliers"]

@@ -146,6 +146,58 @@ def post_mark_filed(
     )
 
 
+class FilingListRow(BaseModel):
+    """Lightweight filing row for the firm-wide picker — no payload."""
+    id: uuid.UUID
+    gstin_profile_id: uuid.UUID
+    gstin: str
+    client_id: uuid.UUID
+    client_name: str
+    return_type: str
+    period: str
+    status: str
+    updated_at: datetime
+
+
+@router.get("/filings", response_model=list[FilingListRow])
+def list_filings(
+    status: Optional[str] = Query(default=None, pattern=r"^(draft|approved|filed)$"),
+    return_type: Optional[str] = Query(default=None, pattern=r"^(GSTR1|GSTR3B)$"),
+    period: Optional[str] = Query(default=None, pattern=r"^\d{6}$"),
+    limit: int = Query(default=50, ge=1, le=200),
+    user: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> list[FilingListRow]:
+    """Firm-wide filing list — RLS-scoped, joined with client/gstin so
+    the picker UI can render "Ramesh Textiles · GSTR-3B · Jul 2026"
+    without a second call per row."""
+    where: list[str] = ["1 = 1"]
+    params: dict[str, Any] = {"lim": limit}
+    if status:
+        where.append("fr.status::text = :st")
+        params["st"] = status
+    if return_type:
+        where.append("fr.return_type::text = :rt")
+        params["rt"] = return_type
+    if period:
+        where.append("fr.period = :p")
+        params["p"] = period
+
+    sql = (
+        "SELECT fr.id, fr.gstin_profile_id, gp.gstin, "
+        "c.id AS client_id, c.trade_name AS client_name, "
+        "fr.return_type::text AS return_type, fr.period, "
+        "fr.status::text AS status, fr.updated_at "
+        "FROM filing_run fr "
+        "JOIN gstin_profile gp ON gp.id = fr.gstin_profile_id "
+        "JOIN client c ON c.id = gp.client_id "
+        f"WHERE {' AND '.join(where)} "
+        "ORDER BY fr.updated_at DESC LIMIT :lim"
+    )
+    rows = session.execute(text(sql), params).mappings().all()
+    return [FilingListRow(**dict(r)) for r in rows]
+
+
 @router.get("/gstins/{gstin_profile_id}/filings", response_model=list[FilingRow])
 def list_for_gstin(
     gstin_profile_id: uuid.UUID,

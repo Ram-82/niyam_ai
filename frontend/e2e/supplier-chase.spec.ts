@@ -12,10 +12,10 @@
  *     against a stock docker-compose setup.
  */
 import { test, expect } from "@playwright/test";
-import { authenticator } from "otplib";
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+
+import { bootstrapFirm } from "./bootstrap";
 
 
 const API = process.env.NIYAM_API_BASE || "http://localhost:8000";
@@ -50,37 +50,23 @@ type Ctx = {
 
 
 async function seedFirmWithSupplierDefault(): Promise<Ctx> {
-  const email = `chase-${randomUUID()}@example.com`;
-  const password = "Correct-Horse-Battery-Staple-42";
+  const boot = await bootstrapFirm({
+    firmName: "ChaseCo",
+    emailPrefix: "chase",
+    clientTradeName: "Chase Traders",
+    gstin: "29ABCDE1234F1Z5",
+  });
   const seed = `
-import json, uuid, pyotp
+import json, uuid
 from sqlalchemy import create_engine, text
-from app.auth.passwords import hash_password
 engine = create_engine("postgresql+psycopg://niyam:niyam@postgres:5432/niyam")
-firm_id = uuid.uuid4()
-user_id = uuid.uuid4()
-client_id = uuid.uuid4()
-gstin_id = uuid.uuid4()
+firm_id = "${boot.firmId}"
+gstin_id = "${boot.gstinProfileId}"
 pull_id = uuid.uuid4()
 run_id = uuid.uuid4()
 match_id = uuid.uuid4()
 invoice_id = uuid.uuid4()
-secret = pyotp.random_base32()
 with engine.begin() as c:
-    c.execute(text("INSERT INTO ca_firm (id, name) VALUES (:i, 'ChaseCo')"), {"i": firm_id})
-    c.execute(text(
-        "INSERT INTO app_user (id, firm_id, email, password_hash, role, "
-        "totp_secret, totp_confirmed, is_active) VALUES "
-        "(:i, :f, :e, :ph, 'admin', :ts, TRUE, TRUE)"),
-        {"i": user_id, "f": firm_id, "e": ${JSON.stringify(email)},
-         "ph": hash_password(${JSON.stringify(password)}), "ts": secret})
-    c.execute(text(
-        "INSERT INTO client (id, firm_id, trade_name) VALUES (:c, :f, 'Chase Traders')"),
-        {"c": client_id, "f": firm_id})
-    c.execute(text(
-        "INSERT INTO gstin_profile (id, firm_id, client_id, gstin, state_code) "
-        "VALUES (:g, :f, :c, '29ABCDE1234F1Z5', '29')"),
-        {"g": gstin_id, "f": firm_id, "c": client_id})
     # Invoice for the match_result to reference.
     c.execute(text(
         "INSERT INTO invoice (id, firm_id, gstin_profile_id, source, direction, "
@@ -106,31 +92,21 @@ with engine.begin() as c:
         "CAST(:ctx AS JSONB))"),
         {"m": match_id, "f": firm_id, "r": run_id, "i": invoice_id,
          "ctx": json.dumps({"near_misses": []})})
-print(f"{firm_id}|{user_id}|{secret}|{gstin_id}|{run_id}|{match_id}")
+print(f"{run_id}|{match_id}")
 `;
   const raw = runInBackend(seed).trim();
   const line = raw.split(/\r?\n/).pop() || "";
-  const [firmId, , totpSecret, gstinProfileId, runId, matchId] = line.split("|");
+  const [runId, matchId] = line.split("|");
 
-  const totpCode = authenticator.generate(totpSecret);
-  const loginRes = await fetch(`${API}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, totp_code: totpCode }),
-  });
-  if (!loginRes.ok) {
-    throw new Error(`login failed: ${loginRes.status} ${await loginRes.text()}`);
-  }
-  const { access_token: token } = await loginRes.json();
   return {
-    firmId,
-    gstinProfileId,
+    firmId: boot.firmId,
+    gstinProfileId: boot.gstinProfileId,
     runId,
     matchId,
-    email,
-    password,
-    totpSecret,
-    token,
+    email: boot.email,
+    password: boot.password,
+    totpSecret: boot.totpSecret,
+    token: boot.token,
   };
 }
 

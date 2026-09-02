@@ -26,14 +26,18 @@ from app.api.firm import router as firm_router
 from app.api.gsp import router as gsp_router
 from app.api.imports import router as imports_router
 from app.api.invites import router as invites_router
+from app.api.legal import router as legal_router
 from app.api.narrator import router as narrator_router
+from app.api.ocr import router as ocr_router
 from app.api.reminders import router as reminders_router
+from app.api.reports import router as reports_router
 from app.api.rule_packs import router as rule_packs_router
 from app.api.supplier_contacts import router as supplier_contacts_router
 from app.api.whatsapp import router as whatsapp_router
 from app.api.workspace import router as workspace_router
 from app.auth.revocation import _redis
 from app.db import app_engine
+from app.erasure.keys import assert_kek_available
 
 
 log = logging.getLogger("niyam.main")
@@ -41,6 +45,12 @@ log = logging.getLogger("niyam.main")
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    # KEK guard — refuse to boot when ERASURE_KEK_KEYS is missing or malformed
+    # in non-mock mode. A silent fallback to the dev KEK would produce
+    # subject_key rows whose ciphertext is decryptable by anyone with the
+    # source tree, which is the entire failure mode this file exists to
+    # prevent. Mock/test mode is explicitly allowed to fall back.
+    assert_kek_available()
     # Ping Postgres via the app engine (SET ROLE runs, so failures here
     # surface a real config problem, not just "database is up").
     with app_engine.connect() as conn:
@@ -83,6 +93,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(invites_router)
+app.include_router(legal_router)
 app.include_router(imports_router)
 app.include_router(command_center_router)
 app.include_router(clients_router)
@@ -90,11 +101,13 @@ app.include_router(workspace_router)
 app.include_router(admin_router)
 app.include_router(gsp_router)
 app.include_router(narrator_router)
+app.include_router(ocr_router)
 app.include_router(whatsapp_router)
 app.include_router(supplier_contacts_router)
 app.include_router(filings_router)
 app.include_router(audit_router)
 app.include_router(reminders_router)
+app.include_router(reports_router)
 app.include_router(rule_packs_router)
 app.include_router(calendar_router)
 app.include_router(firm_router)

@@ -1,0 +1,39 @@
+# Readiness-run overlay for the filing-cycle walkthrough.
+#
+# The walkthrough must not measure the product through the Turbopack dev
+# server. Dev-mode compile-on-demand, hot reload, and dev-only error
+# handling are all in the measurement path and none of them exist in
+# production — a transient dev compile wedge once produced a blank
+# workspace that read as a product gap (see filing-cycle-walkthrough.md).
+#
+# This overlay swaps the frontend to a production server. The build itself
+# is run as an explicit step by walkthrough-run.mjs so its output is
+# captured and reported rather than disappearing into a restart loop.
+#
+# Used via COMPOSE_FILE, which walkthrough-run.mjs sets for every
+# `docker compose` call it makes. Not part of `docker compose up` by hand.
+#
+# It also pins the GSP adapter to mock for the run. The repo `.env` sets
+# GSP_MODE=whitebooks, and compose interpolation reads `.env`, so without
+# this the walkthrough drives the live WhiteBooks sandbox — which is what
+# produced the 502 gsp_unknown_error that was mistaken for a code blocker.
+# Pinning it here is explicit and reviewable in a way that "remember to
+# export GSP_MODE" is not. `.env` is left untouched: it is evidence about
+# the deployment's real configuration.
+#
+# Step 7 submits the mock server's FIXED_OTP, so a non-mock adapter cannot
+# work here by construction. walkthrough-run.mjs additionally asserts
+# GET /gsp/mode and refuses to proceed if the backend disagrees.
+services:
+  api:
+    environment:
+      GSP_MODE: mock
+      GSP_BASE_URL: http://gsp-mock:9000
+
+  worker:
+    environment:
+      GSP_MODE: mock
+      GSP_BASE_URL: http://gsp-mock:9000
+
+  frontend:
+    command: npm run start

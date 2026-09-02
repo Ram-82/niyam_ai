@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.api.deps import get_current_user, get_firm_scoped_session
+from app.legal.gate import require_legal_accepted
 from app.auth import audit
 from app.config import settings
 from app.db import owner_engine
@@ -237,7 +238,9 @@ def disconnect(
 
 @router.post("/pull", response_model=PullResp)
 def pull_now(
-    payload: PullReq, user: AppUser = Depends(get_current_user)
+    payload: PullReq,
+    user: AppUser = Depends(get_current_user),
+    _legal: None = Depends(require_legal_accepted),
 ) -> PullResp:
     """Pull 2B for a (gstin_profile, period). Reuses the JSON-upload
     ingestion path — the resulting ``gstn_pull`` row has
@@ -334,6 +337,83 @@ def mode() -> dict:
 # ---------------------------------------------------------------------------
 # Connection status — powers the workspace Connections panel
 # ---------------------------------------------------------------------------
+
+
+class FirmGspStatus(BaseModel):
+    total_gstins: int
+    connected: int
+    reconnect_needed: int
+    not_connected: int
+    # For the onboarding step badge: "done" iff at least one GSTIN has a live session.
+    any_connected: bool
+    # Label pre-formatted for the sidebar sub-line, so the frontend doesn't
+    # have to re-implement the copy logic in every view.
+    summary_label: str
+
+
+@router.get("/firm-status", response_model=FirmGspStatus)
+def firm_gsp_status(
+    user: AppUser = Depends(get_current_user),
+    session=Depends(get_firm_scoped_session),
+) -> FirmGspStatus:
+    """Aggregate GSP connection status across every GSTIN in the firm.
+
+    Onboarding step 3 uses this to flip its badge from pending → done as
+    soon as any GSTIN has a live session. Also usable by the /v2/status
+    page and the sidebar for at-a-glance connection health.
+    """
+    rows = session.execute(
+        text(
+            """
+            SELECT
+              gp.id AS gstin_profile_id,
+              CASE
+                WHEN live.id IS NOT NULL THEN 'connected'
+                WHEN rev.id IS NOT NULL THEN 'reconnect_needed'
+                ELSE 'not_connected'
+              END AS state
+            FROM gstin_profile gp
+            LEFT JOIN LATERAL (
+              SELECT id FROM gsp_session
+              WHERE gstin_profile_id = gp.id AND revoked_at IS NULL
+              LIMIT 1
+            ) live ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT id FROM gsp_session
+              WHERE gstin_profile_id = gp.id AND revoked_at IS NOT NULL
+              LIMIT 1
+            ) rev ON TRUE
+            """
+        )
+    ).mappings().all()
+
+    connected = sum(1 for r in rows if r["state"] == "connected")
+    reconnect_needed = sum(1 for r in rows if r["state"] == "reconnect_needed")
+    not_connected = sum(1 for r in rows if r["state"] == "not_connected")
+    total = len(rows)
+
+    if total == 0:
+        label = "No GSTINs added yet"
+    elif connected == total:
+        label = f"All {total} GSTIN{'' if total == 1 else 's'} connected"
+    elif connected == 0 and reconnect_needed == 0:
+        label = f"0 of {total} GSTIN{'' if total == 1 else 's'} connected"
+    else:
+        parts = [f"{connected} connected"]
+        if reconnect_needed:
+            parts.append(f"{reconnect_needed} need reconnect")
+        if not_connected:
+            parts.append(f"{not_connected} not connected")
+        label = " · ".join(parts)
+
+    return FirmGspStatus(
+        total_gstins=total,
+        connected=connected,
+        reconnect_needed=reconnect_needed,
+        not_connected=not_connected,
+        any_connected=connected > 0,
+        summary_label=label,
+    )
 
 
 @router.get("/connection/{gstin_profile_id}", response_model=ConnectionStatus)
@@ -494,39 +574,45 @@ def scheduler_run(
     else:
         dt = datetime.fromisoformat(today)
 
-    # (Concurrency guard) Take a Postgres advisory lock on the owner
-    # engine. pg_try_advisory_lock returns FALSE immediately if another
-    # session holds it — we log + skip rather than block.
-    with owner_engine.begin() as conn:
-        got_lock = conn.execute(
-            text("SELECT pg_try_advisory_lock(:k)"),
-            {"k": _SCHEDULER_LOCK_KEY},
-        ).scalar_one()
-    if not got_lock:
-        # Audit the skipped trigger firm-agnostically — write to audit_log
-        # with a synthetic firm_id would break RLS, so we log via a
-        # non-tenant channel: stderr + a row would be nice but the
-        # audit_log requires a firm. Punt to stderr for cross-firm events.
-        import logging
-
-        logging.getLogger("niyam.gsp.scheduler").warning(
-            "scheduler.skipped reason=concurrency_locked today=%s",
-            dt.date().isoformat(),
-        )
-        return {
-            "today": dt.date().isoformat(),
-            "status": "skipped_concurrency_locked",
-            "attempts": [],
-        }
-
+    # (Concurrency guard) Advisory lock on a single held connection.
+    # pg_advisory_lock / pg_advisory_unlock are session-scoped: the release
+    # only counts on the session that acquired it. If acquire and release
+    # ran in two separate ``owner_engine.begin()`` blocks the pool could
+    # hand out different backends, the unlock would be a no-op on the
+    # release side, and the lock would leak on the acquire session until
+    # the process restarted (pool_recycle is unset → -1 → never). We keep
+    # ONE connection checked out for the whole sweep so both queries land
+    # on the same backend.
+    conn = owner_engine.connect()
     try:
-        reports = service.run_scheduled_pulls(dt)
-    finally:
-        with owner_engine.begin() as conn:
-            conn.execute(
-                text("SELECT pg_advisory_unlock(:k)"),
+        with conn.begin():
+            got_lock = conn.execute(
+                text("SELECT pg_try_advisory_lock(:k)"),
                 {"k": _SCHEDULER_LOCK_KEY},
+            ).scalar_one()
+        if not got_lock:
+            import logging
+
+            logging.getLogger("niyam.gsp.scheduler").warning(
+                "scheduler.skipped reason=concurrency_locked today=%s",
+                dt.date().isoformat(),
             )
+            return {
+                "today": dt.date().isoformat(),
+                "status": "skipped_concurrency_locked",
+                "attempts": [],
+            }
+
+        try:
+            reports = service.run_scheduled_pulls(dt)
+        finally:
+            with conn.begin():
+                conn.execute(
+                    text("SELECT pg_advisory_unlock(:k)"),
+                    {"k": _SCHEDULER_LOCK_KEY},
+                )
+    finally:
+        conn.close()
     # Per-firm audit: one row per firm that had at least one attempt.
     # Actor is NULL — the system ran this, not a user.
     firms_touched = {r["firm_id"] for r in reports}

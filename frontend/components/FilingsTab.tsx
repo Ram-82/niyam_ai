@@ -8,6 +8,7 @@
  */
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/format-api-error";
 import { formatPeriod, formatTimestampIN } from "@/lib/format-date";
 import type { AuditRow, FilingRow } from "@/lib/types";
 
@@ -79,7 +80,7 @@ export function FilingsTab({ gid, period, returnType }: Props) {
     try {
       await fn();
     } catch (e) {
-      setError(e instanceof ApiError ? `${e.status}: ${e.message}` : String(e));
+      setError(formatApiError(e));
     } finally {
       setLoading(false);
     }

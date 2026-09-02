@@ -386,8 +386,10 @@ def test_A7_credit_note_is_excluded_from_reconciliation(scenario) -> None:
 
 
 def test_A7_frozen_cdn_disclaimer_still_appears_in_summary(scenario) -> None:
-    # Frozen honest-label. Restyle OK, reword NOT OK.
-    assert scenario["summary"]["disclaimer"] == "before credit/debit note adjustments"
+    # Frozen honest-label. Surrounding text may be extended (CDN parser
+    # appends per-run context), but the load-bearing phrase must remain
+    # exactly this — restyle OK, reword NOT OK.
+    assert "before credit/debit note adjustments" in scenario["summary"]["disclaimer"]
 
 
 # ---------------------------------------------------------------------------

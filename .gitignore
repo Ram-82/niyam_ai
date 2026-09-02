@@ -55,5 +55,10 @@ niyam_pg/
 niyam_uploads/
 niyam_node_modules/
 
+# Design lab — embedded git repo (Figma HTML mockups + Vite scaffold).
+# Not committed to the main repo; it's a reference-only handoff bundle
+# whose contents live in their own history.
+design_handoff_niyam_ai/
+
 # Claude Code runtime state (per-session locks, transcripts, etc.)
 .claude/
